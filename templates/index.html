@@ -1,0 +1,375 @@
+{% extends "layout.html" %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center p-2 mx-auto" style="max-width: 92rem;">
+    <div class="d-flex align-items-center gap-4">
+        <h1>Proxy Manager</h1>
+        <button type="button" class="btn btn-sm btn-primary" id="add-proxy-toggle">Add Proxy</button>
+    </div>
+    <form method="post" action="/logout" class="m-0">
+        <button type="submit" class="btn btn-sm btn-outline-secondary">Logout</button>
+    </form>
+</div>
+
+<dialog id="add-proxy-modal" class="p-3 border rounded">
+    <form id="add-proxy-form" class="d-flex flex-column gap-2" method="dialog">
+        <h2 class="h5 mb-1">Add Proxy</h2>
+        <input type="text" class="form-control" id="add-ip" placeholder="IP address" required>
+        <div id="add-ip-error" class="text-danger small"></div>
+        <input type="number" class="form-control" id="add-port" placeholder="Port" min="1" max="65535" required>
+        <div id="add-port-error" class="text-danger small"></div>
+        <select class="form-select" id="add-protocol" required>
+            <option value="tcp">tcp</option>
+            <option value="udp">udp</option>
+            <option value="both">tcp &amp; udp</option>
+        </select>
+        <div id="add-protocol-error" class="text-danger small"></div>
+        <div id="add-form-error" class="text-danger small"></div>
+        <div class="d-flex gap-2 justify-content-end mt-2">
+            <button type="button" class="btn btn-secondary" id="add-proxy-cancel">Cancel</button>
+            <button type="submit" class="btn btn-success">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<dialog id="edit-proxy-modal" class="p-3 border rounded">
+    <form id="edit-proxy-form" class="d-flex flex-column gap-2" method="dialog">
+        <h2 class="h5 mb-1">Edit Proxy</h2>
+        <input type="text" class="form-control" id="edit-ip" placeholder="IP address" required>
+        <div id="edit-ip-error" class="text-danger small"></div>
+        <input type="number" class="form-control" id="edit-port" placeholder="Port" min="1" max="65535" required>
+        <div id="edit-port-error" class="text-danger small"></div>
+        <select class="form-select" id="edit-protocol" required>
+            <option value="tcp">tcp</option>
+            <option value="udp">udp</option>
+            <option value="both">tcp &amp; udp</option>
+        </select>
+        <div id="edit-protocol-error" class="text-danger small"></div>
+        <div id="edit-form-error" class="text-danger small"></div>
+        <div class="d-flex gap-2 justify-content-end mt-2">
+            <button type="button" class="btn btn-secondary" id="edit-proxy-cancel">Cancel</button>
+            <button type="submit" class="btn btn-success">Save</button>
+        </div>
+    </form>
+</dialog>
+
+<dialog id="delete-proxy-modal" class="p-3 border rounded">
+    <form id="delete-proxy-form" class="d-flex flex-column gap-3" method="dialog">
+        <h2 class="h5 mb-0">Delete Proxy</h2>
+        <p id="delete-proxy-message" class="mb-0">Are you sure?</p>
+        <div id="delete-form-error" class="text-danger small"></div>
+        <div class="d-flex gap-2 justify-content-end">
+            <button type="button" class="btn btn-secondary" id="delete-proxy-cancel">Cancel</button>
+            <button type="submit" class="btn btn-danger">Delete</button>
+        </div>
+    </form>
+</dialog>
+
+<ul id="proxy-list" class="list-group mx-auto" style="max-width: 92rem;">
+
+</ul>
+
+<template id="proxy-row-template">
+    <li class="list-group-item d-flex justify-content-between align-items-center">
+        <span data-role="label" class="fw-medium"></span>
+        <div class="d-flex gap-2">
+            <button type="button" class="btn btn-sm btn-outline-primary" data-role="edit-btn">Edit</button>
+            <button type="button" class="btn btn-sm btn-outline-danger" data-role="remove-btn">Remove</button>
+        </div>
+    </li>
+</template>
+
+<script defer>
+const proxyList = document.getElementById('proxy-list');
+const rowTemplate = document.getElementById('proxy-row-template');
+const addProxyToggle = document.getElementById('add-proxy-toggle');
+const addProxyModal = document.getElementById('add-proxy-modal');
+const addProxyForm = document.getElementById('add-proxy-form');
+const addProxyCancel = document.getElementById('add-proxy-cancel');
+const addIpInput = document.getElementById('add-ip');
+const addPortInput = document.getElementById('add-port');
+const addProtocolInput = document.getElementById('add-protocol');
+const addIpError = document.getElementById('add-ip-error');
+const addPortError = document.getElementById('add-port-error');
+const addProtocolError = document.getElementById('add-protocol-error');
+const addFormError = document.getElementById('add-form-error');
+const editProxyModal = document.getElementById('edit-proxy-modal');
+const editProxyForm = document.getElementById('edit-proxy-form');
+const editProxyCancel = document.getElementById('edit-proxy-cancel');
+const editIpInput = document.getElementById('edit-ip');
+const editPortInput = document.getElementById('edit-port');
+const editProtocolInput = document.getElementById('edit-protocol');
+const editIpError = document.getElementById('edit-ip-error');
+const editPortError = document.getElementById('edit-port-error');
+const editProtocolError = document.getElementById('edit-protocol-error');
+const editFormError = document.getElementById('edit-form-error');
+const deleteProxyModal = document.getElementById('delete-proxy-modal');
+const deleteProxyForm = document.getElementById('delete-proxy-form');
+const deleteProxyCancel = document.getElementById('delete-proxy-cancel');
+const deleteProxyMessage = document.getElementById('delete-proxy-message');
+const deleteFormError = document.getElementById('delete-form-error');
+let editingProxy = null;
+let deletingProxy = null;
+
+function proxyLabel(proxy) {
+    const protocolDisplay = proxy.protocol === 'both' ? 'tcp & udp' : proxy.protocol;
+    return `${proxy.ip}:${proxy.port} (${protocolDisplay})`;
+}
+
+function clearFieldErrors(errorElements) {
+    errorElements.forEach((element) => {
+        element.textContent = '';
+    });
+}
+
+function validateProxyForm(ip, port, protocol, errorElements) {
+    clearFieldErrors([errorElements.ipError, errorElements.portError, errorElements.protocolError, errorElements.formError]);
+
+    let isValid = true;
+    const trimmedIp = ip.trim();
+    const trimmedPort = port.trim();
+    const trimmedProtocol = protocol.trim().toLowerCase();
+
+    if (!trimmedIp) {
+        errorElements.ipError.textContent = 'IP address is required.';
+        isValid = false;
+    }
+
+    const portNumber = Number(trimmedPort);
+    if (!trimmedPort || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+        errorElements.portError.textContent = 'Port must be a whole number between 1 and 65535.';
+        isValid = false;
+    }
+
+    if (!['tcp', 'udp', 'both'].includes(trimmedProtocol)) {
+        errorElements.protocolError.textContent = 'Protocol must be tcp, udp, or tcp & udp.';
+        isValid = false;
+    }
+
+    return {
+        isValid,
+        ip: trimmedIp,
+        port: trimmedPort,
+        protocol: trimmedProtocol,
+    };
+}
+
+async function loadProxies() {
+    proxyList.innerHTML = '';
+
+    try {
+        const response = await fetch('/api/proxies');
+        if (!response.ok) {
+            throw new Error('Failed to load proxies');
+        }
+
+        const proxies = await response.json();
+        proxies.forEach((proxy) => {
+            const row = rowTemplate.content.cloneNode(true);
+            const listItem = row.querySelector('li');
+            const label = row.querySelector('[data-role="label"]');
+            const editButton = row.querySelector('[data-role="edit-btn"]');
+            const removeButton = row.querySelector('[data-role="remove-btn"]');
+
+            label.textContent = proxyLabel(proxy);
+
+            editButton.addEventListener('click', async () => {
+                editingProxy = {
+                    ip: proxy.ip,
+                    port: proxy.port,
+                    protocol: proxy.protocol,
+                };
+                editIpInput.value = proxy.ip;
+                editPortInput.value = proxy.port;
+                editProtocolInput.value = proxy.protocol;
+                editProxyModal.showModal();
+                editIpInput.focus();
+            });
+
+            removeButton.addEventListener('click', async () => {
+                deletingProxy = {
+                    ip: proxy.ip,
+                    port: proxy.port,
+                    protocol: proxy.protocol,
+                };
+                deleteFormError.textContent = '';
+                deleteProxyMessage.textContent = `Remove ${proxyLabel(proxy)}?`;
+                deleteProxyModal.showModal();
+            });
+
+            proxyList.appendChild(row);
+        });
+    } catch (error) {
+        console.error('Error fetching proxies:', error);
+    }
+}
+
+addProxyToggle.addEventListener('click', () => {
+    clearFieldErrors([addIpError, addPortError, addProtocolError, addFormError]);
+    addProxyModal.showModal();
+    addIpInput.focus();
+});
+
+addProxyCancel.addEventListener('click', () => {
+    clearFieldErrors([addIpError, addPortError, addProtocolError, addFormError]);
+    addProxyForm.reset();
+    addProxyModal.close();
+});
+
+addProxyModal.addEventListener('click', (event) => {
+    if (event.target === addProxyModal) {
+        clearFieldErrors([addIpError, addPortError, addProtocolError, addFormError]);
+        addProxyForm.reset();
+        addProxyModal.close();
+    }
+});
+
+addProxyForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+
+    const validation = validateProxyForm(
+        addIpInput.value,
+        addPortInput.value,
+        addProtocolInput.value,
+        {
+            ipError: addIpError,
+            portError: addPortError,
+            protocolError: addProtocolError,
+            formError: addFormError,
+        }
+    );
+
+    if (!validation.isValid) {
+        return;
+    }
+
+    const addResponse = await fetch('/api/add', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            ip: validation.ip,
+            port: validation.port,
+            protocol: validation.protocol,
+        }),
+    });
+
+    if (!addResponse.ok) {
+        const errorData = await addResponse.json().catch(() => ({}));
+        addFormError.textContent = errorData.error || 'Failed to add proxy';
+        return;
+    }
+
+    clearFieldErrors([addIpError, addPortError, addProtocolError, addFormError]);
+    addProxyForm.reset();
+    addProxyModal.close();
+    await loadProxies();
+});
+
+editProxyCancel.addEventListener('click', () => {
+    clearFieldErrors([editIpError, editPortError, editProtocolError, editFormError]);
+    editingProxy = null;
+    editProxyForm.reset();
+    editProxyModal.close();
+});
+
+editProxyModal.addEventListener('click', (event) => {
+    if (event.target === editProxyModal) {
+        clearFieldErrors([editIpError, editPortError, editProtocolError, editFormError]);
+        editingProxy = null;
+        editProxyForm.reset();
+        editProxyModal.close();
+    }
+});
+
+editProxyForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!editingProxy) {
+        return;
+    }
+
+    const validation = validateProxyForm(
+        editIpInput.value,
+        editPortInput.value,
+        editProtocolInput.value,
+        {
+            ipError: editIpError,
+            portError: editPortError,
+            protocolError: editProtocolError,
+            formError: editFormError,
+        }
+    );
+
+    if (!validation.isValid) {
+        return;
+    }
+
+    const editResponse = await fetch('/api/edit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            old_ip: editingProxy.ip,
+            old_port: editingProxy.port,
+            old_protocol: editingProxy.protocol,
+            new_ip: validation.ip,
+            new_port: validation.port,
+            new_protocol: validation.protocol,
+        }),
+    });
+
+    if (!editResponse.ok) {
+        const errorData = await editResponse.json().catch(() => ({}));
+        editFormError.textContent = errorData.error || 'Failed to edit proxy';
+        return;
+    }
+
+    clearFieldErrors([editIpError, editPortError, editProtocolError, editFormError]);
+    editingProxy = null;
+    editProxyForm.reset();
+    editProxyModal.close();
+    await loadProxies();
+});
+
+deleteProxyCancel.addEventListener('click', () => {
+    deletingProxy = null;
+    deleteFormError.textContent = '';
+    deleteProxyModal.close();
+});
+
+deleteProxyModal.addEventListener('click', (event) => {
+    if (event.target === deleteProxyModal) {
+        deletingProxy = null;
+        deleteFormError.textContent = '';
+        deleteProxyModal.close();
+    }
+});
+
+deleteProxyForm.addEventListener('submit', async (event) => {
+    event.preventDefault();
+    if (!deletingProxy) {
+        return;
+    }
+
+    const removeResponse = await fetch('/api/remove', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+            ip: deletingProxy.ip,
+            port: deletingProxy.port,
+            protocol: deletingProxy.protocol,
+        }),
+    });
+
+    if (!removeResponse.ok) {
+        const errorData = await removeResponse.json().catch(() => ({}));
+        deleteFormError.textContent = errorData.error || 'Failed to remove proxy';
+        return;
+    }
+
+    deletingProxy = null;
+    deleteFormError.textContent = '';
+    deleteProxyModal.close();
+    await loadProxies();
+});
+
+loadProxies();
+</script>
+{% endblock %}

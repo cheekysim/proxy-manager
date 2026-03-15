@@ -1,0 +1,25 @@
+{
+  "version": "0.2.0",
+  "configurations": [
+    {
+      "name": "Python: Flask (Hot Reload)",
+      "type": "debugpy",
+      "request": "launch",
+      "module": "flask",
+      "args": [
+        "--app",
+        "main.py",
+        "run",
+        "--debug"
+      ],
+      "env": {
+        "FLASK_DEBUG": "1"
+      },
+      "cwd": "${workspaceFolder}",
+      "console": "integratedTerminal",
+      "jinja": true,
+      "subProcess": true,
+      "justMyCode": true
+    }
+  ]
+}
