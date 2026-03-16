@@ -35,8 +35,10 @@
 <dialog id="edit-proxy-modal" class="p-3 border rounded">
     <form id="edit-proxy-form" class="d-flex flex-column gap-2" method="dialog">
         <h2 class="h5 mb-1">Edit Proxy</h2>
-        <input type="text" class="form-control" id="edit-ip" placeholder="IP address" required>
-        <div id="edit-ip-error" class="text-danger small"></div>
+        <select class="form-select" id="edit-node" required>
+            <option value="" disabled selected>Select a node...</option>
+        </select>
+        <div id="edit-node-error" class="text-danger small"></div>
         <input type="number" class="form-control" id="edit-port" placeholder="Port" min="1" max="65535" required>
         <div id="edit-port-error" class="text-danger small"></div>
         <select class="form-select" id="edit-protocol" required>
@@ -65,6 +67,16 @@
     </form>
 </dialog>
 
+<dialog id="nodes-modal" class="p-3 border rounded">
+    <h2 class="h5 mb-3">Nodes</h2>
+    <div class="table-responsive" style="max-height: 60vh; overflow: auto;">
+        <table id="nodes-table" class="table table-striped table-hover mb-0 rounded overflow-hidden">
+            <!-- Node rows will be populated here -->
+        </table>
+    </div>
+</dialog>
+
+<ul id="proxy-list" class="list-group mx-auto p-2" style="max-width: 92rem;">
 <dialog id="nodes-modal" class="p-3 border rounded">
     <h2 class="h5 mb-3">Nodes</h2>
     <div class="table-responsive" style="max-height: 60vh; overflow: auto;">
@@ -110,10 +122,10 @@
     const editProxyModal = document.getElementById('edit-proxy-modal');
     const editProxyForm = document.getElementById('edit-proxy-form');
     const editProxyCancel = document.getElementById('edit-proxy-cancel');
-    const editIpInput = document.getElementById('edit-ip');
+    const editNodeSelect = document.getElementById('edit-node');
     const editPortInput = document.getElementById('edit-port');
     const editProtocolInput = document.getElementById('edit-protocol');
-    const editIpError = document.getElementById('edit-ip-error');
+    const editNodeError = document.getElementById('edit-node-error');
     const editPortError = document.getElementById('edit-port-error');
     const editProtocolError = document.getElementById('edit-protocol-error');
     const editFormError = document.getElementById('edit-form-error');
@@ -219,11 +231,48 @@
                         port: proxy.port,
                         protocol: proxy.protocol,
                     };
-                    editIpInput.value = proxy.ip;
                     editPortInput.value = proxy.port;
                     editProtocolInput.value = proxy.protocol;
+                    editNodeSelect.innerHTML = '<option value="" disabled selected>Loading nodes...</option>';
+                    clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
                     editProxyModal.showModal();
-                    editIpInput.focus();
+
+                    try {
+                        const nodesResponse = await fetch('/api/nodes');
+                        const nodes = await nodesResponse.json();
+                        editNodeSelect.innerHTML = '';
+
+                        const placeholder = document.createElement('option');
+                        placeholder.value = '';
+                        placeholder.disabled = true;
+                        placeholder.textContent = 'Select a node...';
+                        editNodeSelect.appendChild(placeholder);
+
+                        let foundMatch = false;
+                        nodes.forEach((node) => {
+                            const option = document.createElement('option');
+                            option.value = node.id;
+                            option.dataset.ip = node.ip_address || '';
+                            if (node.ip_address) {
+                                option.textContent = `${node.name} (${node.ip_address})`;
+                                if (node.ip_address === proxy.ip) {
+                                    option.selected = true;
+                                    foundMatch = true;
+                                }
+                            } else {
+                                option.textContent = `${node.name} — no IP assigned`;
+                                option.disabled = true;
+                                option.title = 'No IP address assigned. Set one in the Nodes panel.';
+                            }
+                            editNodeSelect.appendChild(option);
+                        });
+
+                        if (!foundMatch) {
+                            placeholder.selected = true;
+                        }
+                    } catch (e) {
+                        editNodeSelect.innerHTML = '<option value="" disabled selected>Failed to load nodes</option>';
+                    }
                 });
 
                 removeButton.addEventListener('click', async () => {
@@ -474,7 +523,7 @@
     });
 
     editProxyCancel.addEventListener('click', () => {
-        clearFieldErrors([editIpError, editPortError, editProtocolError, editFormError]);
+        clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
         editingProxy = null;
         editProxyForm.reset();
         editProxyModal.close();
@@ -482,7 +531,7 @@
 
     editProxyModal.addEventListener('click', (event) => {
         if (event.target === editProxyModal) {
-            clearFieldErrors([editIpError, editPortError, editProtocolError, editFormError]);
+            clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
             editingProxy = null;
             editProxyForm.reset();
             editProxyModal.close();
@@ -495,19 +544,31 @@
             return;
         }
 
-        const validation = validateProxyForm(
-            editIpInput.value,
-            editPortInput.value,
-            editProtocolInput.value,
-            {
-                ipError: editIpError,
-                portError: editPortError,
-                protocolError: editProtocolError,
-                formError: editFormError,
-            }
-        );
+        clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
 
-        if (!validation.isValid) {
+        let isValid = true;
+        const selectedOption = editNodeSelect.options[editNodeSelect.selectedIndex];
+        const selectedIp = selectedOption ? selectedOption.dataset.ip : '';
+
+        if (!editNodeSelect.value || !selectedIp) {
+            editNodeError.textContent = 'Please select a node with an assigned IP address.';
+            isValid = false;
+        }
+
+        const trimmedPort = editPortInput.value.trim();
+        const portNumber = Number(trimmedPort);
+        if (!trimmedPort || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+            editPortError.textContent = 'Port must be a whole number between 1 and 65535.';
+            isValid = false;
+        }
+
+        const trimmedProtocol = editProtocolInput.value.trim().toLowerCase();
+        if (!['tcp', 'udp', 'both'].includes(trimmedProtocol)) {
+            editProtocolError.textContent = 'Protocol must be tcp, udp, or tcp & udp.';
+            isValid = false;
+        }
+
+        if (!isValid) {
             return;
         }
 
@@ -518,9 +579,9 @@
                 old_ip: editingProxy.ip,
                 old_port: editingProxy.port,
                 old_protocol: editingProxy.protocol,
-                new_ip: validation.ip,
-                new_port: validation.port,
-                new_protocol: validation.protocol,
+                new_ip: selectedIp,
+                new_port: trimmedPort,
+                new_protocol: trimmedProtocol,
             }),
         });
 
@@ -530,7 +591,7 @@
             return;
         }
 
-        clearFieldErrors([editIpError, editPortError, editProtocolError, editFormError]);
+        clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
         editingProxy = null;
         editProxyForm.reset();
         editProxyModal.close();
