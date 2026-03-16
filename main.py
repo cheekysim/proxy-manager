@@ -89,11 +89,11 @@ def build_proxy_config(ip, port, protocol):
     p = protocol.lower()
     if p == "both":
         return (
-            f"server {{{{ listen {port}; proxy_pass {ip}:{port}; }}}}\n"
-            f"server {{{{ listen {port} udp; proxy_pass {ip}:{port}; }}}}\n"
+            f"server {{ listen {port}; proxy_pass {ip}:{port}; }}\n"
+            f"server {{ listen {port} udp; proxy_pass {ip}:{port}; }}\n"
         )
     udp_suffix = " udp" if p == "udp" else ""
-    return f"server {{{{ listen {port}{udp_suffix}; proxy_pass {ip}:{port}; }}}}\n"
+    return f"server {{ listen {port}{udp_suffix}; proxy_pass {ip}:{port}; }}\n"
 
 
 def test_and_reload_nginx():

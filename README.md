@@ -43,7 +43,6 @@ cp .env.example .env
 | `ADMIN_PASSWORD` | Admin login password | `admin` |
 | `CONFIG_FILES_PATH` | Path to nginx config directory | `./configs` |
 | `DEVELOPMENT` | Skip nginx reload when `true` | `false` |
-| `PTERODACTYL_NODE_ID` | Pterodactyl node ID to sync allocations with | `0` |
 | `PTERODACTYL_API_URL` | Base URL of your Pterodactyl panel | — |
 | `PTERODACTYL_API_KEY` | Pterodactyl Application API key | — |
 
@@ -61,6 +60,12 @@ gunicorn main:app -w 4 -b 0.0.0.0:5000
 ```
 `-w` is the number of worker processes. A common starting point is `(2 × CPU cores) + 1`.
 
+### 4. Web Config
+
+You will need to set the IP address of your nodes.
+Through the web app, click "Nodes".
+From here, you can configure the IP addresses, otherwise you will not be able to create any entries.
+
 ## nginx Configuration
 
 Place generated config files in your nginx stream `conf.d` directory. Your main nginx config should include:
@@ -77,20 +82,20 @@ Set `CONFIG_FILES_PATH` in `.env` to point to that directory.
 
 Each proxy is stored as a single `.conf` file named `<IP-with-dashes>_<PORT>_<PROTOCOL>.conf`.
 
-**TCP only** (`10-0-10-30_25565_tcp.conf`):
+**TCP only** (`192-168-1-0_25565_tcp.conf`):
 ```nginx
-server { listen 25565; proxy_pass 10.0.10.30:25565; }
+server { listen 25565; proxy_pass 192.168.1.0:25565; }
 ```
 
-**UDP only** (`10-0-10-30_25565_udp.conf`):
+**UDP only** (`192-168-1-0_25565_udp.conf`):
 ```nginx
-server { listen 25565 udp; proxy_pass 10.0.10.30:25565; }
+server { listen 25565 udp; proxy_pass 192.168.1.0:25565; }
 ```
 
-**TCP & UDP** (`10-0-10-30_25565_both.conf`):
+**TCP & UDP** (`192-168-1-0_25565_both.conf`):
 ```nginx
-server { listen 25565; proxy_pass 10.0.10.30:25565; }
-server { listen 25565 udp; proxy_pass 10.0.10.30:25565; }
+server { listen 25565; proxy_pass 192.168.1.0:25565; }
+server { listen 25565 udp; proxy_pass 192.168.1.0:25565; }
 ```
 
 ## Pterodactyl Sync
