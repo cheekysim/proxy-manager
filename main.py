@@ -196,6 +196,7 @@ def delete_allocation(allocation_id):
     if response.status_code not in {200, 204}:
         raise Exception("Failed to delete allocation in Pterodactyl API")
 
+
 def sync_allocations():
     # Sync allocations from Pterodactyl API to local config files
     parsed_allocations = []
@@ -205,8 +206,16 @@ def sync_allocations():
             parsed = parse_allocation(allocation)
             parsed_allocations.append(parsed)
             filename = proxy_filename(parsed["ip"], parsed["port"], "tcp")
+            filename_udp = proxy_filename(parsed["ip"], parsed["port"], "udp")
+            filename_both = proxy_filename(parsed["ip"], parsed["port"], "both")
             file_path = os.path.join(config_files_path, filename)
-            if not os.path.exists(file_path):
+            file_path_udp = os.path.join(config_files_path, filename_udp)
+            file_path_both = os.path.join(config_files_path, filename_both)
+            if (
+                not os.path.exists(file_path)
+                and not os.path.exists(file_path_udp)
+                and not os.path.exists(file_path_both)
+            ):
                 content = build_proxy_config(parsed["ip"], parsed["port"], "tcp")
                 with open(file_path, "w", encoding="utf-8") as config_file:
                     config_file.write(content)
@@ -222,7 +231,10 @@ def sync_allocations():
             if item.endswith(".conf")
         ]
         # Remove dupe entries keeping tcp over udp if both exist for same ip:port
-        items = sorted(items, key=lambda x: (x["ip"], x["port"], 0 if x["protocol"] == "tcp" else 1))
+        items = sorted(
+            items,
+            key=lambda x: (x["ip"], x["port"], 0 if x["protocol"] == "tcp" else 1),
+        )
         unique_items = []
         seen = set()
         for item in items:
@@ -232,7 +244,9 @@ def sync_allocations():
                 seen.add(key)
         items = unique_items
 
-        print(f"Found {len(items)} proxy config files locally and {len(parsed_allocations)} allocations from Pterodactyl API")
+        print(
+            f"Found {len(items)} proxy config files locally and {len(parsed_allocations)} allocations from Pterodactyl API"
+        )
         for item in unique_items:
             if not any(
                 alloc["ip"] == item["ip"] and str(alloc["port"]) == item["port"]
@@ -258,6 +272,19 @@ def start_hourly_sync_task():
     thread.start()
 
 
+def list_nodes_from_pterodactyl():
+    url = f"{os.getenv('PTERODACTYL_API_URL')}/application/nodes"
+    key = os.getenv("PTERODACTYL_API_KEY")
+    headers = {
+        "Authorization": f"Bearer {key}",
+        "Accept": "application/json",
+    }
+    response = requests.get(url, headers=headers)
+    if response.status_code != 200:
+        raise Exception("Failed to fetch nodes from Pterodactyl API")
+    return response.json().get("data", [])
+
+
 @app.route("/")
 def index():
     token = request.cookies.get("jwt_token")
@@ -276,6 +303,84 @@ def list_items(current_user):
     ]
     items = [item for item in items if item is not None]
     return jsonify(items)
+
+
+@app.route("/api/nodes", methods=["GET"])
+@token_required
+def list_nodes(current_user):
+    try:
+        nodes = list_nodes_from_pterodactyl()
+
+        # Add nodes to local database if not exist
+        for node in nodes:
+            try:
+                existing_node = Node.query.filter_by(
+                    id=node["attributes"]["id"]
+                ).first()
+                if not existing_node:
+                    new_node = Node(
+                        id=node["attributes"]["id"],
+                        name=node["attributes"]["name"],
+                        fqdn=node["attributes"]["fqdn"],
+                        ip_address=None,
+                    )
+                    db.session.add(new_node)
+            except Exception as e:
+                print(f"Error processing node {node['attributes']['id']}: {e}")
+        db.session.commit()
+
+        # Get all nodes from local database to ensure we have a complete list
+        nodes = Node.query.all()
+
+        # Return nodes with IP addresses (if assigned) or null if not assigned
+
+        return jsonify(
+            [
+                {
+                    "id": node.id,
+                    "name": node.name,
+                    "fqdn": node.fqdn,
+                    "ip_address": node.ip_address,
+                }
+                for node in nodes
+            ]
+        )
+
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
+
+
+@app.route("/api/update_node_ip", methods=["POST"])
+@token_required
+def update_node_ip(current_user):
+    payload = request.get_json(silent=True) or {}
+    node_id = payload.get("id")
+    raw_ip = payload.get("ip")
+
+    if node_id is None or node_id == "":
+        return jsonify({"error": "Node ID is required"}), 400
+
+    ip_address = None
+    if raw_ip is not None:
+        ip_text = str(raw_ip).strip()
+        if ip_text:
+            try:
+                ipaddress.ip_address(ip_text)
+            except ValueError:
+                return jsonify({"error": "Invalid IP address"}), 400
+            ip_address = ip_text
+
+    try:
+        node = Node.query.filter_by(id=node_id).first()
+        if not node:
+            return jsonify({"error": "Node not found"}), 404
+
+        node.ip_address = ip_address
+        db.session.commit()
+
+        return jsonify({"ok": True})
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 
 @app.route("/api/add", methods=["POST"])
@@ -300,11 +405,15 @@ def add_proxy(current_user):
         for alt in ("tcp", "udp"):
             alt_path = os.path.join(config_files_path, proxy_filename(ip, port, alt))
             if os.path.exists(alt_path):
-                return jsonify({"error": f"A separate {alt} config already exists for {ip}:{port}"}), 409
+                return jsonify(
+                    {"error": f"A separate {alt} config already exists for {ip}:{port}"}
+                ), 409
     else:
         both_path = os.path.join(config_files_path, proxy_filename(ip, port, "both"))
         if os.path.exists(both_path):
-            return jsonify({"error": f"A tcp & udp config already exists for {ip}:{port}"}), 409
+            return jsonify(
+                {"error": f"A tcp & udp config already exists for {ip}:{port}"}
+            ), 409
 
     os.makedirs(config_files_path, exist_ok=True)
     content = build_proxy_config(ip, port, protocol)
@@ -439,13 +548,25 @@ def edit_proxy(current_user):
     if old_path != new_path:
         if new_protocol == "both":
             for alt in ("tcp", "udp"):
-                alt_path = os.path.join(config_files_path, proxy_filename(new_ip, new_port, alt))
+                alt_path = os.path.join(
+                    config_files_path, proxy_filename(new_ip, new_port, alt)
+                )
                 if os.path.exists(alt_path) and alt_path != old_path:
-                    return jsonify({"error": f"A separate {alt} config already exists for {new_ip}:{new_port}"}), 409
+                    return jsonify(
+                        {
+                            "error": f"A separate {alt} config already exists for {new_ip}:{new_port}"
+                        }
+                    ), 409
         else:
-            both_path = os.path.join(config_files_path, proxy_filename(new_ip, new_port, "both"))
+            both_path = os.path.join(
+                config_files_path, proxy_filename(new_ip, new_port, "both")
+            )
             if os.path.exists(both_path) and both_path != old_path:
-                return jsonify({"error": f"A tcp & udp config already exists for {new_ip}:{new_port}"}), 409
+                return jsonify(
+                    {
+                        "error": f"A tcp & udp config already exists for {new_ip}:{new_port}"
+                    }
+                ), 409
 
     with open(old_path, "r", encoding="utf-8") as config_file:
         old_content = config_file.read()
@@ -525,6 +646,14 @@ def edit_proxy(current_user):
         return jsonify(error_payload), 500
 
     return jsonify({"ok": True})
+
+
+# Node IP Assignments
+class Node(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    name = db.Column(db.String(100), unique=True)
+    fqdn = db.Column(db.String(255), unique=True)
+    ip_address = db.Column(db.String(45), unique=True, nullable=True)
 
 
 # Authentication
