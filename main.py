@@ -119,7 +119,6 @@ def get_allocations_from_pterodactyl():
     response = requests.get(url, headers=headers)
     if response.status_code != 200:
         raise Exception("Failed to fetch allocations from Pterodactyl API")
-    print(response.json().get("data", []))
     return response.json().get("data", [])
 
 
