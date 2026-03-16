@@ -100,9 +100,9 @@ def test_and_reload_nginx():
     if development_mode:
         return True, None
 
-    result = subprocess.run(["nginx", "-t"], capture_output=True)
+    result = subprocess.run(["sudo", "nginx", "-t"], capture_output=True)
     if result.returncode == 0:
-        os.system("nginx -s reload")
+        subprocess.run(["sudo", "nginx", "-s", "reload"])
         return True, None
 
     error_message = result.stderr.decode().strip()

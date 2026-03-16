@@ -22,6 +22,8 @@ A Flask web application for managing nginx stream proxy configurations with Pter
 ### 1. Clone and create a virtual environment
 
 ```bash
+cd /opt
+git clone https://github.com/cheekysim/proxy-manager
 cd proxy-manager
 python -m venv .venv
 source .venv/bin/activate
@@ -138,9 +140,9 @@ After=network.target
 
 [Service]
 User=www-data
-WorkingDirectory=/home/cheekysim/code/proxy-manager
-EnvironmentFile=/home/cheekysim/code/proxy-manager/.env
-ExecStart=/home/cheekysim/code/proxy-manager/.venv/bin/gunicorn main:app \
+WorkingDirectory=/root/proxy-manager
+EnvironmentFile=/root/proxy-manager/.env
+ExecStart=/root/proxy-manager/.venv/bin/gunicorn main:app \
     -w 4 \
     -b 127.0.0.1:5000 \
     --access-logfile /var/log/proxy-manager/access.log \
@@ -157,6 +159,7 @@ Enable and start:
 ```bash
 sudo mkdir -p /var/log/proxy-manager
 sudo chown www-data: /var/log/proxy-manager
+sudo chown www-data: /opt/proxy-manager
 sudo systemctl daemon-reload
 sudo systemctl enable --now proxy-manager
 ```
@@ -168,14 +171,18 @@ sudo systemctl status proxy-manager
 journalctl -u proxy-manager -f
 ```
 
-### nginx reverse proxy
+### 4. nginx reverse proxy
 
-Add a server block to proxy HTTP traffic to Gunicorn:
+Add a server block to proxy HTTP traffic to Gunicorn. Place this in `/etc/nginx/sites-available/proxy-manager` and symlink it into `/etc/nginx/sites-enabled/` — **not** in the stream `conf.d` directory used for TCP/UDP proxies.
+
+```bash
+sudo ln -s /etc/nginx/sites-available/proxy-manager /etc/nginx/sites-enabled/proxy-manager
+```
 
 ```nginx
 server {
     listen 80;
-    server_name your.domain.com;
+    server_name proxy.domain.com;
 
     location / {
         proxy_pass http://127.0.0.1:5000;
