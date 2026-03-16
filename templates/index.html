@@ -14,8 +14,10 @@
 <dialog id="add-proxy-modal" class="p-3 border rounded">
     <form id="add-proxy-form" class="d-flex flex-column gap-2" method="dialog">
         <h2 class="h5 mb-1">Add Proxy</h2>
-        <input type="text" class="form-control" id="add-ip" placeholder="IP address" required>
-        <div id="add-ip-error" class="text-danger small"></div>
+        <select class="form-select" id="add-node" required>
+            <option value="" disabled selected>Select a node...</option>
+        </select>
+        <div id="add-node-error" class="text-danger small"></div>
         <input type="number" class="form-control" id="add-port" placeholder="Port" min="1" max="65535" required>
         <div id="add-port-error" class="text-danger small"></div>
         <select class="form-select" id="add-protocol" required>
@@ -77,569 +79,623 @@
 </dialog>
 
 <ul id="proxy-list" class="list-group mx-auto p-2" style="max-width: 92rem;">
-<dialog id="nodes-modal" class="p-3 border rounded">
-    <h2 class="h5 mb-3">Nodes</h2>
-    <div class="table-responsive" style="max-height: 60vh; overflow: auto;">
-        <table id="nodes-table" class="table table-striped table-hover mb-0 rounded overflow-hidden">
-            <!-- Node rows will be populated here -->
-        </table>
-    </div>
-</dialog>
-
-<ul id="proxy-list" class="list-group mx-auto p-2" style="max-width: 92rem;">
-
-</ul>
-
-<template id="proxy-row-template">
-    <li class="list-group-item d-flex justify-content-between align-items-center">
-        <span data-role="label" class="fw-medium"></span>
-        <div class="d-flex gap-2">
-            <button type="button" class="btn btn-sm btn-outline-primary" data-role="edit-btn">Edit</button>
-            <button type="button" class="btn btn-sm btn-outline-danger" data-role="remove-btn">Remove</button>
+    <dialog id="nodes-modal" class="p-3 border rounded">
+        <h2 class="h5 mb-3">Nodes</h2>
+        <div class="table-responsive" style="max-height: 60vh; overflow: auto;">
+            <table id="nodes-table" class="table table-striped table-hover mb-0 rounded overflow-hidden">
+                <!-- Node rows will be populated here -->
+            </table>
         </div>
-    </li>
-</template>
+    </dialog>
 
-<script defer>
-    const proxyList = document.getElementById('proxy-list');
-    const nodesTable = document.getElementById('nodes-table');
-    const rowTemplate = document.getElementById('proxy-row-template');
+    <ul id="proxy-list" class="list-group mx-auto p-2" style="max-width: 92rem;">
 
-    // Modals and form elements
-    const nodesToggle = document.getElementById('nodes-toggle');
-    const nodesModal = document.getElementById('nodes-modal');
-    const addProxyToggle = document.getElementById('add-proxy-toggle');
-    const addProxyModal = document.getElementById('add-proxy-modal');
-    const addProxyForm = document.getElementById('add-proxy-form');
-    const addProxyCancel = document.getElementById('add-proxy-cancel');
-    const addIpInput = document.getElementById('add-ip');
-    const addPortInput = document.getElementById('add-port');
-    const addProtocolInput = document.getElementById('add-protocol');
-    const addIpError = document.getElementById('add-ip-error');
-    const addPortError = document.getElementById('add-port-error');
-    const addProtocolError = document.getElementById('add-protocol-error');
-    const addFormError = document.getElementById('add-form-error');
-    const editProxyModal = document.getElementById('edit-proxy-modal');
-    const editProxyForm = document.getElementById('edit-proxy-form');
-    const editProxyCancel = document.getElementById('edit-proxy-cancel');
-    const editNodeSelect = document.getElementById('edit-node');
-    const editPortInput = document.getElementById('edit-port');
-    const editProtocolInput = document.getElementById('edit-protocol');
-    const editNodeError = document.getElementById('edit-node-error');
-    const editPortError = document.getElementById('edit-port-error');
-    const editProtocolError = document.getElementById('edit-protocol-error');
-    const editFormError = document.getElementById('edit-form-error');
-    const deleteProxyModal = document.getElementById('delete-proxy-modal');
-    const deleteProxyForm = document.getElementById('delete-proxy-form');
-    const deleteProxyCancel = document.getElementById('delete-proxy-cancel');
-    const deleteProxyMessage = document.getElementById('delete-proxy-message');
-    const deleteFormError = document.getElementById('delete-form-error');
-    let editingProxy = null;
-    let deletingProxy = null;
+    </ul>
 
-    function proxyLabel(proxy) {
-        const protocolDisplay = proxy.protocol === 'both' ? 'tcp & udp' : proxy.protocol;
-        return `${proxy.ip}:${proxy.port} (${protocolDisplay})`;
-    }
+    <template id="proxy-row-template">
+        <li class="list-group-item d-flex justify-content-between align-items-center">
+            <span data-role="label" class="fw-medium"></span>
+            <div class="d-flex gap-2">
+                <button type="button" class="btn btn-sm btn-outline-primary" data-role="edit-btn">Edit</button>
+                <button type="button" class="btn btn-sm btn-outline-danger" data-role="remove-btn">Remove</button>
+            </div>
+        </li>
+    </template>
 
-    function clearFieldErrors(errorElements) {
-        errorElements.forEach((element) => {
-            element.textContent = '';
-        });
-    }
+    <script defer>
+        const proxyList = document.getElementById('proxy-list');
+        const nodesTable = document.getElementById('nodes-table');
+        const rowTemplate = document.getElementById('proxy-row-template');
 
-    const gearIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-gear d-block mx-auto" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        // Modals and form elements
+        const nodesToggle = document.getElementById('nodes-toggle');
+        const nodesModal = document.getElementById('nodes-modal');
+        const addProxyToggle = document.getElementById('add-proxy-toggle');
+        const addProxyModal = document.getElementById('add-proxy-modal');
+        const addProxyForm = document.getElementById('add-proxy-form');
+        const addProxyCancel = document.getElementById('add-proxy-cancel');
+        const addNodeSelect = document.getElementById('add-node');
+        const addPortInput = document.getElementById('add-port');
+        const addProtocolInput = document.getElementById('add-protocol');
+        const addNodeError = document.getElementById('add-node-error');
+        const addPortError = document.getElementById('add-port-error');
+        const addProtocolError = document.getElementById('add-protocol-error');
+        const addFormError = document.getElementById('add-form-error');
+        const editProxyModal = document.getElementById('edit-proxy-modal');
+        const editProxyForm = document.getElementById('edit-proxy-form');
+        const editProxyCancel = document.getElementById('edit-proxy-cancel');
+        const editNodeSelect = document.getElementById('edit-node');
+        const editPortInput = document.getElementById('edit-port');
+        const editProtocolInput = document.getElementById('edit-protocol');
+        const editNodeError = document.getElementById('edit-node-error');
+        const editPortError = document.getElementById('edit-port-error');
+        const editProtocolError = document.getElementById('edit-protocol-error');
+        const editFormError = document.getElementById('edit-form-error');
+        const deleteProxyModal = document.getElementById('delete-proxy-modal');
+        const deleteProxyForm = document.getElementById('delete-proxy-form');
+        const deleteProxyCancel = document.getElementById('delete-proxy-cancel');
+        const deleteProxyMessage = document.getElementById('delete-proxy-message');
+        const deleteFormError = document.getElementById('delete-form-error');
+        let editingProxy = null;
+        let deletingProxy = null;
+
+        function proxyLabel(proxy, nodeName) {
+            const protocolDisplay = proxy.protocol === 'both' ? 'tcp & udp' : proxy.protocol;
+            const nodeDisplay = nodeName || proxy.ip;
+            return `${nodeDisplay}:${proxy.port} (${protocolDisplay})`;
+        }
+
+        function clearFieldErrors(errorElements) {
+            errorElements.forEach((element) => {
+                element.textContent = '';
+            });
+        }
+
+        const gearIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-gear d-block mx-auto" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
     <path d="M8 4.754a3.246 3.246 0 1 0 0 6.492 3.246 3.246 0 0 0 0-6.492M5.754 8a2.246 2.246 0 1 1 4.492 0 2.246 2.246 0 0 1-4.492 0"/>
     <path d="M9.796 1.343c-.527-1.79-3.065-1.79-3.592 0l-.094.319a.873.873 0 0 1-1.255.52l-.292-.16c-1.64-.892-3.433.902-2.54 2.541l.159.292a.873.873 0 0 1-.52 1.255l-.319.094c-1.79.527-1.79 3.065 0 3.592l.319.094a.873.873 0 0 1 .52 1.255l-.16.292c-.892 1.64.901 3.434 2.541 2.54l.292-.159a.873.873 0 0 1 1.255.52l.094.319c.527 1.79 3.065 1.79 3.592 0l.094-.319a.873.873 0 0 1 1.255-.52l.292.16c1.64.893 3.434-.902 2.54-2.541l-.159-.292a.873.873 0 0 1 .52-1.255l.319-.094c1.79-.527 1.79-3.065 0-3.592l-.319-.094a.873.873 0 0 1-.52-1.255l.16-.292c.893-1.64-.902-3.433-2.541-2.54l-.292.159a.873.873 0 0 1-1.255-.52zm-2.633.283c.246-.835 1.428-.835 1.674 0l.094.319a1.873 1.873 0 0 0 2.693 1.115l.291-.16c.764-.415 1.6.42 1.184 1.185l-.159.292a1.873 1.873 0 0 0 1.116 2.692l.318.094c.835.246.835 1.428 0 1.674l-.319.094a1.873 1.873 0 0 0-1.115 2.693l.16.291c.415.764-.42 1.6-1.185 1.184l-.291-.159a1.873 1.873 0 0 0-2.693 1.116l-.094.318c-.246.835-1.428.835-1.674 0l-.094-.319a1.873 1.873 0 0 0-2.692-1.115l-.292.16c-.764.415-1.6-.42-1.184-1.185l.159-.291A1.873 1.873 0 0 0 1.945 8.93l-.319-.094c-.835-.246-.835-1.428 0-1.674l.319-.094A1.873 1.873 0 0 0 3.06 4.377l-.16-.292c-.415-.764.42-1.6 1.185-1.184l.292.159a1.873 1.873 0 0 0 2.692-1.115z"/>
 </svg>`;
 
-    const editIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-pencil-square" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        const editIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-pencil-square" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
     <path d="M15.502 1.94a.5.5 0 0 1 0 .706L14.459 3.69l-2-2L13.502.646a.5.5 0 0 1 .707 0l1.293 1.293zm-1.75 2.456-2-2L4.939 9.21a.5.5 0 0 0-.121.196l-.805 2.414a.25.25 0 0 0 .316.316l2.414-.805a.5.5 0 0 0 .196-.12l6.813-6.814z"/>
     <path fill-rule="evenodd" d="M1 13.5A1.5 1.5 0 0 0 2.5 15h11a1.5 1.5 0 0 0 1.5-1.5v-6a.5.5 0 0 0-1 0v6a.5.5 0 0 1-.5.5h-11a.5.5 0 0 1-.5-.5v-11a.5.5 0 0 1 .5-.5H9a.5.5 0 0 0 0-1H2.5A1.5 1.5 0 0 0 1 2.5z"/>
 </svg>`;
 
-    const saveIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-floppy" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        const saveIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-floppy" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
     <path d="M11 2H9v3h2z"/>
     <path d="M1.5 0h11.586a1.5 1.5 0 0 1 1.06.44l1.415 1.414A1.5 1.5 0 0 1 16 2.914V14.5a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 0 14.5v-13A1.5 1.5 0 0 1 1.5 0M1 1.5v13a.5.5 0 0 0 .5.5H2v-4.5A1.5 1.5 0 0 1 3.5 9h9a1.5 1.5 0 0 1 1.5 1.5V15h.5a.5.5 0 0 0 .5-.5V2.914a.5.5 0 0 0-.146-.353l-1.415-1.415A.5.5 0 0 0 13.086 1H13v4.5A1.5 1.5 0 0 1 11.5 7h-7A1.5 1.5 0 0 1 3 5.5V1H1.5a.5.5 0 0 0-.5.5m3 4a.5.5 0 0 0 .5.5h7a.5.5 0 0 0 .5-.5V1H4zM3 15h10v-4.5a.5.5 0 0 0-.5-.5h-9a.5.5 0 0 0-.5.5z"/>
 </svg>`;
 
-    const cancelIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-x-square" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
+        const cancelIconSvg = `<svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" fill="currentColor" class="bi bi-x-square" viewBox="0 0 16 16" aria-hidden="true" focusable="false">
     <path d="M14 1a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H2a1 1 0 0 1-1-1V2a1 1 0 0 1 1-1zM2 0a2 2 0 0 0-2 2v12a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V2a2 2 0 0 0-2-2z"/>
     <path d="M4.646 4.646a.5.5 0 0 1 .708 0L8 7.293l2.646-2.647a.5.5 0 0 1 .708.708L8.707 8l2.647 2.646a.5.5 0 0 1-.708.708L8 8.707l-2.646 2.647a.5.5 0 0 1-.708-.708L7.293 8 4.646 5.354a.5.5 0 0 1 0-.708"/>
 </svg>`;
 
-    function setIconButton(button, svgMarkup, title, ariaLabel) {
-        button.innerHTML = svgMarkup;
-        button.setAttribute('title', title);
-        button.setAttribute('aria-label', ariaLabel);
-    }
-
-    function validateProxyForm(ip, port, protocol, errorElements) {
-        clearFieldErrors([errorElements.ipError, errorElements.portError, errorElements.protocolError, errorElements.formError]);
-
-        let isValid = true;
-        const trimmedIp = ip.trim();
-        const trimmedPort = port.trim();
-        const trimmedProtocol = protocol.trim().toLowerCase();
-
-        if (!trimmedIp) {
-            errorElements.ipError.textContent = 'IP address is required.';
-            isValid = false;
+        function setIconButton(button, svgMarkup, title, ariaLabel) {
+            button.innerHTML = svgMarkup;
+            button.setAttribute('title', title);
+            button.setAttribute('aria-label', ariaLabel);
         }
 
-        const portNumber = Number(trimmedPort);
-        if (!trimmedPort || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
-            errorElements.portError.textContent = 'Port must be a whole number between 1 and 65535.';
-            isValid = false;
-        }
+        function validateProxyForm(ip, port, protocol, errorElements) {
+            clearFieldErrors([errorElements.ipError, errorElements.portError, errorElements.protocolError, errorElements.formError]);
 
-        if (!['tcp', 'udp', 'both'].includes(trimmedProtocol)) {
-            errorElements.protocolError.textContent = 'Protocol must be tcp, udp, or tcp & udp.';
-            isValid = false;
-        }
+            let isValid = true;
+            const trimmedIp = ip.trim();
+            const trimmedPort = port.trim();
+            const trimmedProtocol = protocol.trim().toLowerCase();
 
-        return {
-            isValid,
-            ip: trimmedIp,
-            port: trimmedPort,
-            protocol: trimmedProtocol,
-        };
-    }
-
-    async function loadProxies() {
-        proxyList.innerHTML = '';
-
-        try {
-            const response = await fetch('/api/proxies');
-            if (!response.ok) {
-                throw new Error('Failed to load proxies');
+            if (!trimmedIp) {
+                errorElements.ipError.textContent = 'IP address is required.';
+                isValid = false;
             }
 
-            const proxies = await response.json();
-            proxies.forEach((proxy) => {
-                const row = rowTemplate.content.cloneNode(true);
-                const listItem = row.querySelector('li');
-                const label = row.querySelector('[data-role="label"]');
-                const editButton = row.querySelector('[data-role="edit-btn"]');
-                const removeButton = row.querySelector('[data-role="remove-btn"]');
+            const portNumber = Number(trimmedPort);
+            if (!trimmedPort || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+                errorElements.portError.textContent = 'Port must be a whole number between 1 and 65535.';
+                isValid = false;
+            }
 
-                label.textContent = proxyLabel(proxy);
+            if (!['tcp', 'udp', 'both'].includes(trimmedProtocol)) {
+                errorElements.protocolError.textContent = 'Protocol must be tcp, udp, or tcp & udp.';
+                isValid = false;
+            }
 
-                editButton.addEventListener('click', async () => {
-                    editingProxy = {
-                        ip: proxy.ip,
-                        port: proxy.port,
-                        protocol: proxy.protocol,
-                    };
-                    editPortInput.value = proxy.port;
-                    editProtocolInput.value = proxy.protocol;
-                    editNodeSelect.innerHTML = '<option value="" disabled selected>Loading nodes...</option>';
-                    clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
-                    editProxyModal.showModal();
+            return {
+                isValid,
+                ip: trimmedIp,
+                port: trimmedPort,
+                protocol: trimmedProtocol,
+            };
+        }
 
-                    try {
-                        const nodesResponse = await fetch('/api/nodes');
-                        const nodes = await nodesResponse.json();
-                        editNodeSelect.innerHTML = '';
+        async function loadProxies() {
+            proxyList.innerHTML = '';
 
-                        const placeholder = document.createElement('option');
-                        placeholder.value = '';
-                        placeholder.disabled = true;
-                        placeholder.textContent = 'Select a node...';
-                        editNodeSelect.appendChild(placeholder);
+            try {
+                const [proxiesResponse, nodesResponse] = await Promise.all([
+                    fetch('/api/proxies'),
+                    fetch('/api/nodes'),
+                ]);
+                if (!proxiesResponse.ok) {
+                    throw new Error('Failed to load proxies');
+                }
 
-                        let foundMatch = false;
-                        nodes.forEach((node) => {
-                            const option = document.createElement('option');
-                            option.value = node.id;
-                            option.dataset.ip = node.ip_address || '';
-                            if (node.ip_address) {
-                                option.textContent = `${node.name} (${node.ip_address})`;
-                                if (node.ip_address === proxy.ip) {
-                                    option.selected = true;
-                                    foundMatch = true;
+                const proxies = await proxiesResponse.json();
+                const nodes = nodesResponse.ok ? await nodesResponse.json() : [];
+                const nodeByIp = {};
+                nodes.forEach((node) => {
+                    if (node.ip_address) {
+                        nodeByIp[node.ip_address] = node;
+                    }
+                });
+
+                proxies.forEach((proxy) => {
+                    const row = rowTemplate.content.cloneNode(true);
+                    const listItem = row.querySelector('li');
+                    const label = row.querySelector('[data-role="label"]');
+                    const editButton = row.querySelector('[data-role="edit-btn"]');
+                    const removeButton = row.querySelector('[data-role="remove-btn"]');
+
+                    const matchedNode = nodeByIp[proxy.ip];
+                    label.textContent = proxyLabel(proxy, matchedNode?.name);
+
+                    editButton.addEventListener('click', async () => {
+                        editingProxy = {
+                            ip: proxy.ip,
+                            port: proxy.port,
+                            protocol: proxy.protocol,
+                        };
+                        editPortInput.value = proxy.port;
+                        editProtocolInput.value = proxy.protocol;
+                        editNodeSelect.innerHTML = '<option value="" disabled selected>Loading nodes...</option>';
+                        clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
+                        editProxyModal.showModal();
+
+                        try {
+                            const nodesResponse = await fetch('/api/nodes');
+                            const nodes = await nodesResponse.json();
+                            editNodeSelect.innerHTML = '';
+
+                            const placeholder = document.createElement('option');
+                            placeholder.value = '';
+                            placeholder.disabled = true;
+                            placeholder.textContent = 'Select a node...';
+                            editNodeSelect.appendChild(placeholder);
+
+                            let foundMatch = false;
+                            nodes.forEach((node) => {
+                                const option = document.createElement('option');
+                                option.value = node.id;
+                                option.dataset.ip = node.ip_address || '';
+                                if (node.ip_address) {
+                                    option.textContent = `${node.name} (${node.ip_address})`;
+                                    if (node.ip_address === proxy.ip) {
+                                        option.selected = true;
+                                        foundMatch = true;
+                                    }
+                                } else {
+                                    option.textContent = `${node.name} — no IP assigned`;
+                                    option.disabled = true;
+                                    option.title = 'No IP address assigned. Set one in the Nodes panel.';
                                 }
-                            } else {
-                                option.textContent = `${node.name} — no IP assigned`;
-                                option.disabled = true;
-                                option.title = 'No IP address assigned. Set one in the Nodes panel.';
+                                editNodeSelect.appendChild(option);
+                            });
+
+                            if (!foundMatch) {
+                                placeholder.selected = true;
                             }
-                            editNodeSelect.appendChild(option);
-                        });
-
-                        if (!foundMatch) {
-                            placeholder.selected = true;
+                        } catch (e) {
+                            editNodeSelect.innerHTML = '<option value="" disabled selected>Failed to load nodes</option>';
                         }
-                    } catch (e) {
-                        editNodeSelect.innerHTML = '<option value="" disabled selected>Failed to load nodes</option>';
-                    }
-                });
-
-                removeButton.addEventListener('click', async () => {
-                    deletingProxy = {
-                        ip: proxy.ip,
-                        port: proxy.port,
-                        protocol: proxy.protocol,
-                    };
-                    deleteFormError.textContent = '';
-                    deleteProxyMessage.textContent = `Remove ${proxyLabel(proxy)}?`;
-                    deleteProxyModal.showModal();
-                });
-
-                proxyList.appendChild(row);
-            });
-        } catch (error) {
-            console.error('Error fetching proxies:', error);
-        }
-    }
-
-    async function loadNodes() {
-        nodesTable.innerHTML = '';
-        const listHeader = document.createElement('thead');
-        listHeader.className = 'table-light table-striped table-hover';
-
-        const headerRow = document.createElement('tr');
-
-        const idHeader = document.createElement('th');
-        idHeader.scope = 'col';
-        idHeader.textContent = 'ID';
-
-        const nameHeader = document.createElement('th');
-        nameHeader.scope = 'col';
-        nameHeader.textContent = 'Name';
-
-        const ipHeader = document.createElement('th');
-        ipHeader.scope = 'col';
-        ipHeader.textContent = 'IP';
-
-        const editHeader = document.createElement('th');
-        editHeader.scope = 'col';
-        editHeader.className = 'text-center align-middle';
-        editHeader.setAttribute('aria-label', 'Actions');
-        editHeader.innerHTML = gearIconSvg;
-
-        headerRow.appendChild(idHeader);
-        headerRow.appendChild(nameHeader);
-        headerRow.appendChild(ipHeader);
-        headerRow.appendChild(editHeader);
-
-        listHeader.appendChild(headerRow);
-
-        nodesTable.appendChild(listHeader);
-
-        try {
-            const response = await fetch('/api/nodes');
-            if (!response.ok) {
-                throw new Error('Failed to load nodes');
-            }
-
-            const nodes = await response.json();
-
-            const listBody = document.createElement('tbody');
-
-            nodes.forEach((node) => {
-                const listItem = document.createElement('tr');
-                listItem.className = 'align-middle';
-
-                const idCell = document.createElement('th');
-                idCell.scope = 'row';
-                idCell.className = 'align-middle';
-                idCell.textContent = node.id;
-
-                const nameCell = document.createElement('td');
-                nameCell.className = 'align-middle';
-                nameCell.textContent = node.name;
-
-                const ipCell = document.createElement('td');
-                ipCell.className = 'align-middle';
-                ipCell.textContent = node.ip_address || 'N/A';
-
-                const editCell = document.createElement('td');
-                editCell.className = 'text-nowrap align-middle';
-                const editButton = document.createElement('button');
-                editButton.type = 'button';
-                editButton.className = 'btn btn-sm d-inline-flex justify-content-center align-items-center';
-                setIconButton(editButton, editIconSvg, 'Edit', `Edit node ${node.name}`);
-                editCell.appendChild(editButton);
-
-                listItem.appendChild(idCell);
-                listItem.appendChild(nameCell);
-                listItem.appendChild(ipCell);
-                listItem.appendChild(editCell);
-
-                listBody.appendChild(listItem);
-
-                let isEditing = false;
-                let ipInput = null;
-                let cancelButton = null;
-
-                function exitEditMode(restoreOriginalIp) {
-                    isEditing = false;
-                    if (restoreOriginalIp) {
-                        ipCell.textContent = node.ip_address || 'N/A';
-                    }
-                    if (cancelButton) {
-                        cancelButton.remove();
-                        cancelButton = null;
-                    }
-                    ipInput = null;
-                    setIconButton(editButton, editIconSvg, 'Edit', `Edit node ${node.name}`);
-                }
-
-                function enterEditMode() {
-                    isEditing = true;
-                    ipInput = document.createElement('input');
-                    ipInput.type = 'text';
-                    ipInput.className = 'form-control form-control-sm';
-                    ipInput.value = node.ip_address || '';
-                    ipCell.textContent = '';
-                    ipCell.appendChild(ipInput);
-
-                    setIconButton(editButton, saveIconSvg, 'Save', `Save node ${node.name}`);
-
-                    cancelButton = document.createElement('button');
-                    cancelButton.type = 'button';
-                    cancelButton.className = 'btn btn-sm d-inline-flex justify-content-center align-items-center ms-2';
-                    setIconButton(cancelButton, cancelIconSvg, 'Cancel', `Cancel edit for node ${node.name}`);
-                    editCell.appendChild(cancelButton);
-
-                    cancelButton.addEventListener('click', () => {
-                        exitEditMode(true);
                     });
+
+                    removeButton.addEventListener('click', async () => {
+                        deletingProxy = {
+                            ip: proxy.ip,
+                            port: proxy.port,
+                            protocol: proxy.protocol,
+                        };
+                        deleteFormError.textContent = '';
+                        deleteProxyMessage.textContent = `Remove ${proxyLabel(proxy, matchedNode?.name)}?`;
+                        deleteProxyModal.showModal();
+                    });
+
+                    proxyList.appendChild(row);
+                });
+            } catch (error) {
+                console.error('Error fetching proxies:', error);
+            }
+        }
+
+        async function loadNodes() {
+            nodesTable.innerHTML = '';
+            const listHeader = document.createElement('thead');
+            listHeader.className = 'table-dark table-striped table-hover';
+
+            const headerRow = document.createElement('tr');
+
+            const idHeader = document.createElement('th');
+            idHeader.scope = 'col';
+            idHeader.textContent = 'ID';
+
+            const nameHeader = document.createElement('th');
+            nameHeader.scope = 'col';
+            nameHeader.textContent = 'Name';
+
+            const ipHeader = document.createElement('th');
+            ipHeader.scope = 'col';
+            ipHeader.textContent = 'IP';
+
+            const editHeader = document.createElement('th');
+            editHeader.scope = 'col';
+            editHeader.className = 'text-center align-middle';
+            editHeader.setAttribute('aria-label', 'Actions');
+            editHeader.innerHTML = gearIconSvg;
+
+            headerRow.appendChild(idHeader);
+            headerRow.appendChild(nameHeader);
+            headerRow.appendChild(ipHeader);
+            headerRow.appendChild(editHeader);
+
+            listHeader.appendChild(headerRow);
+
+            nodesTable.appendChild(listHeader);
+
+            try {
+                const response = await fetch('/api/nodes');
+                if (!response.ok) {
+                    throw new Error('Failed to load nodes');
                 }
 
-                editButton.addEventListener('click', async () => {
-                    if (!isEditing) {
-                        enterEditMode();
-                        return;
+                const nodes = await response.json();
+
+                const listBody = document.createElement('tbody');
+
+                nodes.forEach((node) => {
+                    const listItem = document.createElement('tr');
+                    listItem.className = 'align-middle';
+
+                    const idCell = document.createElement('th');
+                    idCell.scope = 'row';
+                    idCell.className = 'align-middle';
+                    idCell.textContent = node.id;
+
+                    const nameCell = document.createElement('td');
+                    nameCell.className = 'align-middle';
+                    nameCell.textContent = node.name;
+
+                    const ipCell = document.createElement('td');
+                    ipCell.className = 'align-middle';
+                    ipCell.textContent = node.ip_address || 'N/A';
+
+                    const editCell = document.createElement('td');
+                    editCell.className = 'text-nowrap align-middle';
+                    const editButton = document.createElement('button');
+                    editButton.type = 'button';
+                    editButton.className = 'btn btn-sm d-inline-flex justify-content-center align-items-center';
+                    setIconButton(editButton, editIconSvg, 'Edit', `Edit node ${node.name}`);
+                    editCell.appendChild(editButton);
+
+                    listItem.appendChild(idCell);
+                    listItem.appendChild(nameCell);
+                    listItem.appendChild(ipCell);
+                    listItem.appendChild(editCell);
+
+                    listBody.appendChild(listItem);
+
+                    let isEditing = false;
+                    let ipInput = null;
+                    let cancelButton = null;
+
+                    function exitEditMode(restoreOriginalIp) {
+                        isEditing = false;
+                        if (restoreOriginalIp) {
+                            ipCell.textContent = node.ip_address || 'N/A';
+                        }
+                        if (cancelButton) {
+                            cancelButton.remove();
+                            cancelButton = null;
+                        }
+                        ipInput = null;
+                        setIconButton(editButton, editIconSvg, 'Edit', `Edit node ${node.name}`);
                     }
 
-                    const newIp = (ipInput?.value || '').trim();
-                    editButton.disabled = true;
+                    function enterEditMode() {
+                        isEditing = true;
+                        ipInput = document.createElement('input');
+                        ipInput.type = 'text';
+                        ipInput.className = 'form-control form-control-sm';
+                        ipInput.value = node.ip_address || '';
+                        ipCell.textContent = '';
+                        ipCell.appendChild(ipInput);
 
-                    try {
-                        const updateResponse = await fetch('/api/update_node_ip', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                                id: node.id,
-                                ip: newIp,
-                            }),
+                        setIconButton(editButton, saveIconSvg, 'Save', `Save node ${node.name}`);
+
+                        cancelButton = document.createElement('button');
+                        cancelButton.type = 'button';
+                        cancelButton.className = 'btn btn-sm d-inline-flex justify-content-center align-items-center ms-2';
+                        setIconButton(cancelButton, cancelIconSvg, 'Cancel', `Cancel edit for node ${node.name}`);
+                        editCell.appendChild(cancelButton);
+
+                        cancelButton.addEventListener('click', () => {
+                            exitEditMode(true);
                         });
+                    }
 
-                        if (!updateResponse.ok) {
-                            const errorData = await updateResponse.json().catch(() => ({}));
-                            console.error('Failed to update node IP', errorData.error || updateResponse.statusText);
+                    editButton.addEventListener('click', async () => {
+                        if (!isEditing) {
+                            enterEditMode();
                             return;
                         }
 
-                        node.ip_address = newIp || null;
-                        exitEditMode(true);
-                    } finally {
-                        editButton.disabled = false;
-                    }
+                        const newIp = (ipInput?.value || '').trim();
+                        editButton.disabled = true;
+
+                        try {
+                            const updateResponse = await fetch('/api/update_node_ip', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                    id: node.id,
+                                    ip: newIp,
+                                }),
+                            });
+
+                            if (!updateResponse.ok) {
+                                const errorData = await updateResponse.json().catch(() => ({}));
+                                console.error('Failed to update node IP', errorData.error || updateResponse.statusText);
+                                return;
+                            }
+
+                            node.ip_address = newIp || null;
+                            exitEditMode(true);
+                        } finally {
+                            editButton.disabled = false;
+                        }
+                    });
                 });
-            });
 
-            nodesTable.appendChild(listBody);
-        } catch (error) {
-            console.error('Error fetching nodes:', error);
-            const errorBody = document.createElement('tbody');
-            const errorRow = document.createElement('tr');
-            const errorCell = document.createElement('td');
-            errorCell.colSpan = 4;
-            errorCell.className = 'text-danger';
-            errorCell.textContent = 'Failed to load nodes';
-            errorRow.appendChild(errorCell);
-            errorBody.appendChild(errorRow);
-            nodesTable.appendChild(errorBody);
-        }
-    }
-
-    nodesToggle.addEventListener('click', () => {
-        loadNodes();
-        nodesModal.showModal();
-    });
-
-    addProxyToggle.addEventListener('click', () => {
-        clearFieldErrors([addIpError, addPortError, addProtocolError, addFormError]);
-        addProxyModal.showModal();
-        addIpInput.focus();
-    });
-
-    addProxyCancel.addEventListener('click', () => {
-        clearFieldErrors([addIpError, addPortError, addProtocolError, addFormError]);
-        addProxyForm.reset();
-        addProxyModal.close();
-    });
-
-    addProxyModal.addEventListener('click', (event) => {
-        if (event.target === addProxyModal) {
-            clearFieldErrors([addIpError, addPortError, addProtocolError, addFormError]);
-            addProxyForm.reset();
-            addProxyModal.close();
-        }
-    });
-
-    addProxyForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-
-        const validation = validateProxyForm(
-            addIpInput.value,
-            addPortInput.value,
-            addProtocolInput.value,
-            {
-                ipError: addIpError,
-                portError: addPortError,
-                protocolError: addProtocolError,
-                formError: addFormError,
+                nodesTable.appendChild(listBody);
+            } catch (error) {
+                console.error('Error fetching nodes:', error);
+                const errorBody = document.createElement('tbody');
+                const errorRow = document.createElement('tr');
+                const errorCell = document.createElement('td');
+                errorCell.colSpan = 4;
+                errorCell.className = 'text-danger';
+                errorCell.textContent = 'Failed to load nodes';
+                errorRow.appendChild(errorCell);
+                errorBody.appendChild(errorRow);
+                nodesTable.appendChild(errorBody);
             }
-        );
-
-        if (!validation.isValid) {
-            return;
         }
 
-        const addResponse = await fetch('/api/add', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ip: validation.ip,
-                port: validation.port,
-                protocol: validation.protocol,
-            }),
+        nodesToggle.addEventListener('click', () => {
+            loadNodes();
+            nodesModal.showModal();
         });
 
-        if (!addResponse.ok) {
-            const errorData = await addResponse.json().catch(() => ({}));
-            addFormError.textContent = errorData.error || 'Failed to add proxy';
-            return;
-        }
+        addProxyToggle.addEventListener('click', async () => {
+            clearFieldErrors([addNodeError, addPortError, addProtocolError, addFormError]);
+            addNodeSelect.innerHTML = '<option value="" disabled selected>Loading nodes...</option>';
+            addProxyModal.showModal();
 
-        clearFieldErrors([addIpError, addPortError, addProtocolError, addFormError]);
-        addProxyForm.reset();
-        addProxyModal.close();
-        await loadProxies();
-    });
+            try {
+                const nodesResponse = await fetch('/api/nodes');
+                const nodes = await nodesResponse.json();
+                addNodeSelect.innerHTML = '';
 
-    editProxyCancel.addEventListener('click', () => {
-        clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
-        editingProxy = null;
-        editProxyForm.reset();
-        editProxyModal.close();
-    });
+                const placeholder = document.createElement('option');
+                placeholder.value = '';
+                placeholder.disabled = true;
+                placeholder.selected = true;
+                placeholder.textContent = 'Select a node...';
+                addNodeSelect.appendChild(placeholder);
 
-    editProxyModal.addEventListener('click', (event) => {
-        if (event.target === editProxyModal) {
+                nodes.forEach((node) => {
+                    const option = document.createElement('option');
+                    option.value = node.id;
+                    option.dataset.ip = node.ip_address || '';
+                    if (node.ip_address) {
+                        option.textContent = `${node.name} (${node.ip_address})`;
+                    } else {
+                        option.textContent = `${node.name} — no IP assigned`;
+                        option.disabled = true;
+                        option.title = 'No IP address assigned. Set one in the Nodes panel.';
+                    }
+                    addNodeSelect.appendChild(option);
+                });
+            } catch (e) {
+                addNodeSelect.innerHTML = '<option value="" disabled selected>Failed to load nodes</option>';
+            }
+        });
+
+        addProxyCancel.addEventListener('click', () => {
+            clearFieldErrors([addNodeError, addPortError, addProtocolError, addFormError]);
+            addProxyForm.reset();
+            addProxyModal.close();
+        });
+
+        addProxyModal.addEventListener('click', (event) => {
+            if (event.target === addProxyModal) {
+                clearFieldErrors([addNodeError, addPortError, addProtocolError, addFormError]);
+                addProxyForm.reset();
+                addProxyModal.close();
+            }
+        });
+
+        addProxyForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+
+            clearFieldErrors([addNodeError, addPortError, addProtocolError, addFormError]);
+
+            let isValid = true;
+            const selectedOption = addNodeSelect.options[addNodeSelect.selectedIndex];
+            const selectedIp = selectedOption ? selectedOption.dataset.ip : '';
+
+            if (!addNodeSelect.value || !selectedIp) {
+                addNodeError.textContent = 'Please select a node with an assigned IP address.';
+                isValid = false;
+            }
+
+            const trimmedPort = addPortInput.value.trim();
+            const portNumber = Number(trimmedPort);
+            if (!trimmedPort || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+                addPortError.textContent = 'Port must be a whole number between 1 and 65535.';
+                isValid = false;
+            }
+
+            const trimmedProtocol = addProtocolInput.value.trim().toLowerCase();
+            if (!['tcp', 'udp', 'both'].includes(trimmedProtocol)) {
+                addProtocolError.textContent = 'Protocol must be tcp, udp, or tcp & udp.';
+                isValid = false;
+            }
+
+            if (!isValid) {
+                return;
+            }
+
+            const addResponse = await fetch('/api/add', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ip: selectedIp,
+                    port: trimmedPort,
+                    protocol: trimmedProtocol,
+                }),
+            });
+
+            if (!addResponse.ok) {
+                const errorData = await addResponse.json().catch(() => ({}));
+                addFormError.textContent = errorData.error || 'Failed to add proxy';
+                return;
+            }
+
+            clearFieldErrors([addNodeError, addPortError, addProtocolError, addFormError]);
+            addProxyForm.reset();
+            addProxyModal.close();
+            await loadProxies();
+        });
+
+        editProxyCancel.addEventListener('click', () => {
             clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
             editingProxy = null;
             editProxyForm.reset();
             editProxyModal.close();
-        }
-    });
-
-    editProxyForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        if (!editingProxy) {
-            return;
-        }
-
-        clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
-
-        let isValid = true;
-        const selectedOption = editNodeSelect.options[editNodeSelect.selectedIndex];
-        const selectedIp = selectedOption ? selectedOption.dataset.ip : '';
-
-        if (!editNodeSelect.value || !selectedIp) {
-            editNodeError.textContent = 'Please select a node with an assigned IP address.';
-            isValid = false;
-        }
-
-        const trimmedPort = editPortInput.value.trim();
-        const portNumber = Number(trimmedPort);
-        if (!trimmedPort || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
-            editPortError.textContent = 'Port must be a whole number between 1 and 65535.';
-            isValid = false;
-        }
-
-        const trimmedProtocol = editProtocolInput.value.trim().toLowerCase();
-        if (!['tcp', 'udp', 'both'].includes(trimmedProtocol)) {
-            editProtocolError.textContent = 'Protocol must be tcp, udp, or tcp & udp.';
-            isValid = false;
-        }
-
-        if (!isValid) {
-            return;
-        }
-
-        const editResponse = await fetch('/api/edit', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                old_ip: editingProxy.ip,
-                old_port: editingProxy.port,
-                old_protocol: editingProxy.protocol,
-                new_ip: selectedIp,
-                new_port: trimmedPort,
-                new_protocol: trimmedProtocol,
-            }),
         });
 
-        if (!editResponse.ok) {
-            const errorData = await editResponse.json().catch(() => ({}));
-            editFormError.textContent = errorData.error || 'Failed to edit proxy';
-            return;
-        }
+        editProxyModal.addEventListener('click', (event) => {
+            if (event.target === editProxyModal) {
+                clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
+                editingProxy = null;
+                editProxyForm.reset();
+                editProxyModal.close();
+            }
+        });
 
-        clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
-        editingProxy = null;
-        editProxyForm.reset();
-        editProxyModal.close();
-        await loadProxies();
-    });
+        editProxyForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!editingProxy) {
+                return;
+            }
 
-    deleteProxyCancel.addEventListener('click', () => {
-        deletingProxy = null;
-        deleteFormError.textContent = '';
-        deleteProxyModal.close();
-    });
+            clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
 
-    deleteProxyModal.addEventListener('click', (event) => {
-        if (event.target === deleteProxyModal) {
+            let isValid = true;
+            const selectedOption = editNodeSelect.options[editNodeSelect.selectedIndex];
+            const selectedIp = selectedOption ? selectedOption.dataset.ip : '';
+
+            if (!editNodeSelect.value || !selectedIp) {
+                editNodeError.textContent = 'Please select a node with an assigned IP address.';
+                isValid = false;
+            }
+
+            const trimmedPort = editPortInput.value.trim();
+            const portNumber = Number(trimmedPort);
+            if (!trimmedPort || !Number.isInteger(portNumber) || portNumber < 1 || portNumber > 65535) {
+                editPortError.textContent = 'Port must be a whole number between 1 and 65535.';
+                isValid = false;
+            }
+
+            const trimmedProtocol = editProtocolInput.value.trim().toLowerCase();
+            if (!['tcp', 'udp', 'both'].includes(trimmedProtocol)) {
+                editProtocolError.textContent = 'Protocol must be tcp, udp, or tcp & udp.';
+                isValid = false;
+            }
+
+            if (!isValid) {
+                return;
+            }
+
+            const editResponse = await fetch('/api/edit', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    old_ip: editingProxy.ip,
+                    old_port: editingProxy.port,
+                    old_protocol: editingProxy.protocol,
+                    new_ip: selectedIp,
+                    new_port: trimmedPort,
+                    new_protocol: trimmedProtocol,
+                }),
+            });
+
+            if (!editResponse.ok) {
+                const errorData = await editResponse.json().catch(() => ({}));
+                editFormError.textContent = errorData.error || 'Failed to edit proxy';
+                return;
+            }
+
+            clearFieldErrors([editNodeError, editPortError, editProtocolError, editFormError]);
+            editingProxy = null;
+            editProxyForm.reset();
+            editProxyModal.close();
+            await loadProxies();
+        });
+
+        deleteProxyCancel.addEventListener('click', () => {
             deletingProxy = null;
             deleteFormError.textContent = '';
             deleteProxyModal.close();
-        }
-    });
-
-    deleteProxyForm.addEventListener('submit', async (event) => {
-        event.preventDefault();
-        if (!deletingProxy) {
-            return;
-        }
-
-        const removeResponse = await fetch('/api/remove', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-                ip: deletingProxy.ip,
-                port: deletingProxy.port,
-                protocol: deletingProxy.protocol,
-            }),
         });
 
-        if (!removeResponse.ok) {
-            const errorData = await removeResponse.json().catch(() => ({}));
-            deleteFormError.textContent = errorData.error || 'Failed to remove proxy';
-            return;
-        }
+        deleteProxyModal.addEventListener('click', (event) => {
+            if (event.target === deleteProxyModal) {
+                deletingProxy = null;
+                deleteFormError.textContent = '';
+                deleteProxyModal.close();
+            }
+        });
 
-        deletingProxy = null;
-        deleteFormError.textContent = '';
-        deleteProxyModal.close();
-        await loadProxies();
-    });
+        deleteProxyForm.addEventListener('submit', async (event) => {
+            event.preventDefault();
+            if (!deletingProxy) {
+                return;
+            }
 
-    loadProxies();
-</script>
-{% endblock %}
+            const removeResponse = await fetch('/api/remove', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    ip: deletingProxy.ip,
+                    port: deletingProxy.port,
+                    protocol: deletingProxy.protocol,
+                }),
+            });
+
+            if (!removeResponse.ok) {
+                const errorData = await removeResponse.json().catch(() => ({}));
+                deleteFormError.textContent = errorData.error || 'Failed to remove proxy';
+                return;
+            }
+
+            deletingProxy = null;
+            deleteFormError.textContent = '';
+            deleteProxyModal.close();
+            await loadProxies();
+        });
+
+        loadProxies();
+    </script>
+    {% endblock %}

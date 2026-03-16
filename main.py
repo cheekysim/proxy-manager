@@ -375,10 +375,52 @@ def update_node_ip(current_user):
         if not node:
             return jsonify({"error": "Node not found"}), 404
 
+        old_ip = node.ip_address
+
+        # Migrate proxy configs when the IP actually changes between two valid addresses
+        renamed_configs = []
+        if old_ip and ip_address and old_ip != ip_address:
+            configs = [
+                parse_proxy_filename(f)
+                for f in os.listdir(config_files_path)
+                if f.endswith(".conf")
+            ]
+            configs = [c for c in configs if c and c["ip"] == old_ip]
+
+            for config in configs:
+                old_path = os.path.join(config_files_path, config["filename"])
+                new_filename = proxy_filename(
+                    ip_address, config["port"], config["protocol"]
+                )
+                new_path = os.path.join(config_files_path, new_filename)
+                os.rename(old_path, new_path)
+                content = build_proxy_config(
+                    ip_address, config["port"], config["protocol"]
+                )
+                with open(new_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                renamed_configs.append((old_path, new_path, config))
+
+            if renamed_configs:
+                success, error_message = test_and_reload_nginx()
+                if not success:
+                    for old_path, new_path, config in renamed_configs:
+                        if os.path.exists(new_path):
+                            os.rename(new_path, old_path)
+                        old_content = build_proxy_config(
+                            old_ip, config["port"], config["protocol"]
+                        )
+                        with open(old_path, "w", encoding="utf-8") as f:
+                            f.write(old_content)
+                    test_and_reload_nginx()
+                    return jsonify(
+                        {"error": f"Nginx reload failed: {error_message}"}
+                    ), 500
+
         node.ip_address = ip_address
         db.session.commit()
 
-        return jsonify({"ok": True})
+        return jsonify({"ok": True, "updated_configs": len(renamed_configs)})
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
