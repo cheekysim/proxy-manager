@@ -140,9 +140,9 @@ After=network.target
 
 [Service]
 User=www-data
-WorkingDirectory=/root/proxy-manager
-EnvironmentFile=/root/proxy-manager/.env
-ExecStart=/root/proxy-manager/.venv/bin/gunicorn main:app \
+WorkingDirectory=/opt/proxy-manager
+EnvironmentFile=/opt/proxy-manager/.env
+ExecStart=/opt/proxy-manager/.venv/bin/gunicorn main:app \
     -w 4 \
     -b 127.0.0.1:5000 \
     --access-logfile /var/log/proxy-manager/access.log \
