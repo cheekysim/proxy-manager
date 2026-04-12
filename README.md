@@ -160,6 +160,8 @@ Enable and start:
 sudo mkdir -p /var/log/proxy-manager
 sudo chown www-data: /var/log/proxy-manager
 sudo chown www-data: /opt/proxy-manager
+echo "www-data ALL=(ALL) NOPASSWD: /usr/sbin/nginx -t, /usr/sbin/nginx -s reload" | sudo tee /etc/sudoers.d/proxy-manager-nginx > /dev/null
+sudo chmod 0440 /etc/sudoers.d/proxy-manager-nginx
 sudo systemctl daemon-reload
 sudo systemctl enable --now proxy-manager
 ```
