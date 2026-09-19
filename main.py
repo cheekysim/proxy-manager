@@ -108,6 +108,18 @@ REMEMBER_TTL = timedelta(days=30)          # "remember me" ticked
 RENEW_BEFORE_EXPIRY = timedelta(hours=24)  # refresh token when < 24h of life left
 
 
+def set_jwt_cookie(response, token, remember, expires=0):
+    response.set_cookie(
+        "jwt_token",
+        token,
+        expires=expires,
+        max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
+        httponly=True,
+        samesite="Lax",
+        secure=not development_mode,
+    )
+
+
 def proxy_filename(ip, port, protocol):
     ip_filename = ip.replace(".", "-")
     return f"{ip_filename}_{port}_{protocol}.conf"
@@ -226,13 +238,7 @@ def token_required(f):
                 app.config["SECRET_KEY"],
                 algorithm="HS256",
             )
-            response.set_cookie(
-                "jwt_token",
-                new_token,
-                max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
-                httponly=True,
-                samesite="Lax",
-            )
+            set_jwt_cookie(response, new_token, remember)
 
         return response
 
@@ -869,13 +875,7 @@ def login():
 
         response = make_response(redirect(url_for("index")))
         # Persistent cookie when "Remember me" is ticked; session cookie otherwise.
-        response.set_cookie(
-            "jwt_token",
-            token,
-            max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
-            httponly=True,
-            samesite="Lax",
-        )
+        set_jwt_cookie(response, token, remember)
 
         return response
 
@@ -885,7 +885,7 @@ def login():
 @app.route("/logout", methods=["POST"])
 def logout():
     response = make_response(redirect(url_for("login")))
-    response.set_cookie("jwt_token", "", expires=0)
+    set_jwt_cookie(response, "", False, expires=0)
     return response
 
 
