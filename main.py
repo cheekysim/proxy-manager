@@ -108,11 +108,10 @@ REMEMBER_TTL = timedelta(days=30)          # "remember me" ticked
 RENEW_BEFORE_EXPIRY = timedelta(hours=24)  # refresh token when < 24h of life left
 
 
-def set_jwt_cookie(response, token, remember, expires=0):
+def set_jwt_cookie(response, token, remember):
     response.set_cookie(
         "jwt_token",
         token,
-        expires=expires,
         max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
         httponly=True,
         samesite="Lax",
