@@ -106,6 +106,8 @@ except ValueError:
 SESSION_TTL = timedelta(days=7)            # "remember me" unticked
 REMEMBER_TTL = timedelta(days=30)          # "remember me" ticked
 RENEW_BEFORE_EXPIRY = timedelta(hours=24)  # refresh token when < 24h of life left
+MIN_TOKEN_REFRESH_INTERVAL = timedelta(hours=1)
+JWT_COOKIE_PATH = "/"
 
 
 def set_jwt_cookie(response, token, remember):
@@ -113,6 +115,7 @@ def set_jwt_cookie(response, token, remember):
         "jwt_token",
         token,
         max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
+        path=JWT_COOKIE_PATH,
         httponly=True,
         samesite="Lax",
         secure=not development_mode,
@@ -122,6 +125,7 @@ def set_jwt_cookie(response, token, remember):
 def clear_jwt_cookie(response):
     response.delete_cookie(
         "jwt_token",
+        path=JWT_COOKIE_PATH,
         httponly=True,
         samesite="Lax",
         secure=not development_mode,
@@ -234,13 +238,23 @@ def token_required(f):
         # of genuine inactivity past the TTL.
         exp_dt = datetime.fromtimestamp(data["exp"], tz=timezone.utc)
         now = datetime.now(timezone.utc)
-        if exp_dt - now < RENEW_BEFORE_EXPIRY:
+        issued_at = data.get("iat")
+        issued_at_dt = (
+            datetime.fromtimestamp(issued_at, tz=timezone.utc)
+            if isinstance(issued_at, (int, float))
+            else None
+        )
+        should_refresh = exp_dt - now < RENEW_BEFORE_EXPIRY and (
+            issued_at_dt is None or now - issued_at_dt >= MIN_TOKEN_REFRESH_INTERVAL
+        )
+        if should_refresh:
             remember = bool(data.get("remember"))
             new_exp = now + (REMEMBER_TTL if remember else SESSION_TTL)
             new_token = jwt.encode(
                 {
                     "public_id": current_user.public_id,
                     "remember": remember,
+                    "iat": now,
                     "exp": new_exp,
                 },
                 app.config["SECRET_KEY"],
@@ -870,12 +884,13 @@ def login():
             db.session.delete(attempt)
             db.session.commit()
         remember = request.form.get("remember") in ("on", "true", "1")
+        issued_at = datetime.now(timezone.utc)
         token = jwt.encode(
             {
                 "public_id": user.public_id,
                 "remember": remember,
-                "exp": datetime.now(timezone.utc)
-                + (REMEMBER_TTL if remember else SESSION_TTL),
+                "iat": issued_at,
+                "exp": issued_at + (REMEMBER_TTL if remember else SESSION_TTL),
             },
             app.config["SECRET_KEY"],
             algorithm="HS256",
