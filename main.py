@@ -447,7 +447,8 @@ def hourly_sync_loop(interval_seconds=3600):
     while True:
         time.sleep(interval_seconds)
         try:
-            sync_allocations()
+            with app.app_context():
+                sync_allocations()
         except Exception as e:
             print(f"Hourly sync failed: {e}")
 
@@ -1146,7 +1147,8 @@ def list_allocations(current_user):
 
 # Startup tasks
 initialize_auth_data()
-sync_allocations()
+with app.app_context():
+    sync_allocations()
 if os.getenv("WERKZEUG_RUN_MAIN") != "false":
     start_hourly_sync_task()
 
