@@ -226,7 +226,7 @@ def token_required(f):
         if current_user is None:
             return jsonify({"message": "Token is invalid!"}), 401
 
-        response = make_response(f(current_user, *args, **kwargs))
+        response = app.make_response(f(current_user, *args, **kwargs))
 
         # Sliding session: while the user is active, renew the token before it
         # expires so they are never logged out just because the session hit its
