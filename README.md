@@ -40,7 +40,7 @@ cp .env.example .env
 
 | Variable | Description | Default |
 |---|---|---|
-| `SECRET_KEY` | Flask/JWT secret key | `bd2ba57e-...` |
+| `SECRET_KEY` | Flask/JWT signing key — **required**, ≥ 32 chars, must be a unique random value (the old hardcoded default is rejected) | — |
 | `ADMIN_USERNAME` | Admin login email | `admin` |
 | `ADMIN_PASSWORD` | Admin login password | `admin` |
 | `CONFIG_FILES_PATH` | Path to nginx config directory | `./configs` |

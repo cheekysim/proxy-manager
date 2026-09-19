@@ -7,6 +7,7 @@
         <button type="button" class="btn btn-sm btn-secondary" id="nodes-toggle">Nodes</button>
     </div>
     <form method="post" action="/logout" class="m-0">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-sm btn-outline-secondary">Logout</button>
     </form>
 </div>
@@ -100,6 +101,7 @@
 </template>
 
 <script defer>
+    const csrfToken = document.querySelector('meta[name="csrf-token"]')?.getAttribute('content') || '';
     const proxyTable = document.getElementById('proxy-table');
     const nodesTable = document.getElementById('nodes-table');
     const rowTemplate = document.getElementById('proxy-row-template');
@@ -495,7 +497,7 @@
                     try {
                         const updateResponse = await fetch('/api/update_node_ip', {
                             method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
+                            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
                             body: JSON.stringify({
                                 id: node.id,
                                 ip: newIp,
@@ -624,7 +626,7 @@
 
         const addResponse = await fetch('/api/add', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
             body: JSON.stringify({
                 ip: selectedIp,
                 port: trimmedPort,
@@ -696,7 +698,7 @@
 
         const editResponse = await fetch('/api/edit', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
             body: JSON.stringify({
                 old_ip: editingProxy.ip,
                 old_port: editingProxy.port,
@@ -742,7 +744,7 @@
 
         const removeResponse = await fetch('/api/remove', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+            headers: { 'Content-Type': 'application/json', 'X-CSRF-Token': csrfToken },
             body: JSON.stringify({
                 ip: deletingProxy.ip,
                 port: deletingProxy.port,
