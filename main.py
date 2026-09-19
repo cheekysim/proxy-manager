@@ -120,6 +120,15 @@ def set_jwt_cookie(response, token, remember, expires=0):
     )
 
 
+def clear_jwt_cookie(response):
+    response.delete_cookie(
+        "jwt_token",
+        httponly=True,
+        samesite="Lax",
+        secure=not development_mode,
+    )
+
+
 def proxy_filename(ip, port, protocol):
     ip_filename = ip.replace(".", "-")
     return f"{ip_filename}_{port}_{protocol}.conf"
@@ -885,7 +894,7 @@ def login():
 @app.route("/logout", methods=["POST"])
 def logout():
     response = make_response(redirect(url_for("login")))
-    set_jwt_cookie(response, "", False, expires=0)
+    clear_jwt_cookie(response)
     return response
 
 
