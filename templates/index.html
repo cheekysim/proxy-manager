@@ -27,6 +27,10 @@
             <option value="both">tcp &amp; udp</option>
         </select>
         <div id="add-protocol-error" class="text-danger small"></div>
+        <div class="form-check form-switch mt-1">
+            <input class="form-check-input" type="checkbox" id="add-sync" checked>
+            <label class="form-check-label" for="add-sync">Sync to Pterodactyl</label>
+        </div>
         <div id="add-form-error" class="text-danger small"></div>
         <div class="d-flex gap-2 justify-content-end mt-2">
             <button type="button" class="btn btn-secondary" id="add-proxy-cancel">Cancel</button>
@@ -91,6 +95,11 @@
         <td data-role="port" class="align-middle"></td>
         <td data-role="protocol" class="align-middle"></td>
         <td data-role="assigned" class="align-middle"></td>
+        <td data-role="pterodactyl" class="align-middle">
+            <div class="form-check form-switch m-0">
+                <input class="form-check-input" type="checkbox" data-role="sync-switch" aria-label="Sync to Pterodactyl">
+            </div>
+        </td>
         <td class="text-nowrap align-middle">
             <div class="d-flex justify-content-end gap-2">
                 <button type="button" class="btn btn-sm btn-outline-primary" data-role="edit-btn">Edit</button>
@@ -116,6 +125,7 @@
     const addNodeSelect = document.getElementById('add-node');
     const addPortInput = document.getElementById('add-port');
     const addProtocolInput = document.getElementById('add-protocol');
+    const addSyncInput = document.getElementById('add-sync');
     const addNodeError = document.getElementById('add-node-error');
     const addPortError = document.getElementById('add-port-error');
     const addProtocolError = document.getElementById('add-protocol-error');
@@ -232,6 +242,10 @@
         assignedHeader.scope = 'col';
         assignedHeader.textContent = 'Assigned';
 
+        const pterodactylHeader = document.createElement('th');
+        pterodactylHeader.scope = 'col';
+        pterodactylHeader.textContent = 'Pterodactyl';
+
         const actionsHeader = document.createElement('th');
         actionsHeader.scope = 'col';
         actionsHeader.className = 'text-center align-middle';
@@ -242,6 +256,7 @@
         headerRow.appendChild(portHeader);
         headerRow.appendChild(protocolHeader);
         headerRow.appendChild(assignedHeader);
+        headerRow.appendChild(pterodactylHeader);
         headerRow.appendChild(actionsHeader);
 
         listHeader.appendChild(headerRow);
@@ -279,6 +294,7 @@
                 const portCell = row.querySelector('[data-role="port"]');
                 const protocolCell = row.querySelector('[data-role="protocol"]');
                 const assignedCell = row.querySelector('[data-role="assigned"]');
+                const syncSwitch = row.querySelector('[data-role="sync-switch"]');
                 const editButton = row.querySelector('[data-role="edit-btn"]');
                 const removeButton = row.querySelector('[data-role="remove-btn"]');
 
@@ -289,6 +305,47 @@
                 portCell.textContent = proxy.port;
                 protocolCell.textContent = proxy.protocol === 'both' ? 'tcp & udp' : proxy.protocol;
                 assignedCell.textContent = matchedAllocation ? (matchedAllocation.assigned ? 'Yes' : 'No') : 'N/A';
+
+                if (syncSwitch) {
+                    syncSwitch.checked = Boolean(proxy.sync_to_pterodactyl);
+                    syncSwitch.addEventListener('change', async (e) => {
+                        const previousState = !syncSwitch.checked;
+                        const newState = syncSwitch.checked;
+                        syncSwitch.disabled = true;
+
+                        try {
+                            const response = await fetch('/api/sync_toggle', {
+                                method: 'POST',
+                                headers: {
+                                    'Content-Type': 'application/json',
+                                    'X-CSRF-Token': csrfToken,
+                                },
+                                body: JSON.stringify({
+                                    ip: proxy.ip,
+                                    port: proxy.port,
+                                    protocol: proxy.protocol,
+                                    sync_to_pterodactyl: newState,
+                                }),
+                            });
+
+                            if (!response.ok) {
+                                const errorData = await response.json().catch(() => ({}));
+                                const errorMsg = errorData.error || 'Failed to toggle Pterodactyl sync';
+                                alert(errorMsg);
+                                syncSwitch.checked = previousState;
+                                proxy.sync_to_pterodactyl = previousState;
+                            } else {
+                                proxy.sync_to_pterodactyl = newState;
+                            }
+                        } catch (err) {
+                            alert('Network error while toggling Pterodactyl sync');
+                            syncSwitch.checked = previousState;
+                            proxy.sync_to_pterodactyl = previousState;
+                        } finally {
+                            syncSwitch.disabled = false;
+                        }
+                    });
+                }
 
                 editButton.addEventListener('click', async () => {
                     editingProxy = {
@@ -361,7 +418,7 @@
             const errorBody = document.createElement('tbody');
             const errorRow = document.createElement('tr');
             const errorCell = document.createElement('td');
-            errorCell.colSpan = 5;
+            errorCell.colSpan = 6;
             errorCell.className = 'text-danger';
             errorCell.textContent = 'Failed to load proxies';
             errorRow.appendChild(errorCell);
@@ -547,6 +604,9 @@
     addProxyToggle.addEventListener('click', async () => {
         clearFieldErrors([addNodeError, addPortError, addProtocolError, addFormError]);
         addNodeSelect.innerHTML = '<option value="" disabled selected>Loading nodes...</option>';
+        if (addSyncInput) {
+            addSyncInput.checked = true;
+        }
         addProxyModal.showModal();
 
         try {
@@ -631,6 +691,7 @@
                 ip: selectedIp,
                 port: trimmedPort,
                 protocol: trimmedProtocol,
+                sync_to_pterodactyl: addSyncInput ? addSyncInput.checked : true,
             }),
         });
 
