@@ -6,6 +6,7 @@ from flask import (
     make_response,
     redirect,
     url_for,
+    session,
 )
 from flask_bootstrap import Bootstrap5
 from flask_sqlalchemy import SQLAlchemy
@@ -17,8 +18,9 @@ from functools import wraps
 from dotenv import load_dotenv
 import os
 import ipaddress
-import subprocess
 import requests
+import secrets
+import subprocess
 import threading
 import time
 
@@ -28,13 +30,53 @@ app = Flask(__name__)
 
 bootstrap = Bootstrap5(app)
 
-app.config["SECRET_KEY"] = os.getenv(
-    "SECRET_KEY", "bd2ba57e-cf1b-44c9-bbf2-217d5c9a37b6"
-)
+# SECRET_KEY is required and must be strong. Reject the historic hardcoded
+# default (which is public in git history) so JWT/session tokens can't be forged.
+_DEFAULT_SECRET = "bd2ba57e-cf1b-44c9-bbf2-217d5c9a37b6"
+_secret = os.getenv("SECRET_KEY", "")
+if not _secret or _secret == _DEFAULT_SECRET or len(_secret) < 32:
+    raise RuntimeError(
+        "SECRET_KEY is missing, weak, or the known default. "
+        "Set a strong, unique SECRET_KEY (>= 32 chars) in .env before starting."
+    )
+app.config["SECRET_KEY"] = _secret
 app.config["SQLALCHEMY_DATABASE_URI"] = "sqlite:///Database.db"
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 
 db = SQLAlchemy(app)
+
+
+# --- Security helpers -------------------------------------------------------
+
+def utcnow():
+    """Naive-UTC now (SQLite-friendly)."""
+    return datetime.now(timezone.utc).replace(tzinfo=None)
+
+
+def get_csrf_token():
+    """Return (creating if needed) the per-session CSRF token."""
+    if "csrf_token" not in session:
+        session["csrf_token"] = secrets.token_urlsafe(32)
+    return session["csrf_token"]
+
+
+app.jinja_env.globals["csrf_token"] = get_csrf_token
+
+
+@app.before_request
+def csrf_protect():
+    """Reject state-changing requests that don't carry a valid CSRF token."""
+    if request.method not in {"POST", "PUT", "PATCH", "DELETE"}:
+        return None
+    expected = session.get("csrf_token", "")
+    supplied = (
+        request.headers.get("X-CSRF-Token")
+        or request.form.get("csrf_token")
+        or ""
+    )
+    if not expected or not supplied or not secrets.compare_digest(expected, supplied):
+        return jsonify({"error": "CSRF validation failed"}), 400
+    return None
 
 config_files_path = os.getenv("CONFIG_FILES_PATH", "./configs")
 
@@ -64,6 +106,27 @@ except ValueError:
 SESSION_TTL = timedelta(days=7)            # "remember me" unticked
 REMEMBER_TTL = timedelta(days=30)          # "remember me" ticked
 RENEW_BEFORE_EXPIRY = timedelta(hours=24)  # refresh token when < 24h of life left
+MIN_TOKEN_REFRESH_INTERVAL = timedelta(hours=1)
+JWT_COOKIE_PATH = "/"
+
+
+def set_jwt_cookie(response, token, remember):
+    response.set_cookie(
+        "jwt_token",
+        token,
+        max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
+        path=JWT_COOKIE_PATH,
+        httponly=True,
+        samesite="Lax",
+        secure=not development_mode,
+    )
+
+
+def clear_jwt_cookie(response):
+    response.delete_cookie(
+        "jwt_token",
+        path=JWT_COOKIE_PATH,
+    )
 
 
 def proxy_filename(ip, port, protocol):
@@ -164,7 +227,7 @@ def token_required(f):
         if current_user is None:
             return jsonify({"message": "Token is invalid!"}), 401
 
-        response = make_response(f(current_user, *args, **kwargs))
+        response = app.make_response(f(current_user, *args, **kwargs))
 
         # Sliding session: while the user is active, renew the token before it
         # expires so they are never logged out just because the session hit its
@@ -172,25 +235,29 @@ def token_required(f):
         # of genuine inactivity past the TTL.
         exp_dt = datetime.fromtimestamp(data["exp"], tz=timezone.utc)
         now = datetime.now(timezone.utc)
-        if exp_dt - now < RENEW_BEFORE_EXPIRY:
+        issued_at = data.get("iat")
+        issued_at_dt = (
+            datetime.fromtimestamp(issued_at, tz=timezone.utc)
+            if isinstance(issued_at, (int, float))
+            else None
+        )
+        should_refresh = exp_dt - now < RENEW_BEFORE_EXPIRY and (
+            issued_at_dt is None or now - issued_at_dt >= MIN_TOKEN_REFRESH_INTERVAL
+        )
+        if should_refresh:
             remember = bool(data.get("remember"))
             new_exp = now + (REMEMBER_TTL if remember else SESSION_TTL)
             new_token = jwt.encode(
                 {
                     "public_id": current_user.public_id,
                     "remember": remember,
+                    "iat": now,
                     "exp": new_exp,
                 },
                 app.config["SECRET_KEY"],
                 algorithm="HS256",
             )
-            response.set_cookie(
-                "jwt_token",
-                new_token,
-                max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
-                httponly=True,
-                samesite="Lax",
-            )
+            set_jwt_cookie(response, new_token, remember)
 
         return response
 
@@ -754,6 +821,15 @@ class User(db.Model):
     password = db.Column(db.String(80))
 
 
+class LoginAttempt(db.Model):
+    """Tracks failed logins to rate-limit brute-force attempts per account."""
+    id = db.Column(db.Integer, primary_key=True)
+    email = db.Column(db.String(100), index=True)
+    attempts = db.Column(db.Integer, default=0)
+    first_attempt_at = db.Column(db.DateTime)
+    locked_until = db.Column(db.DateTime, nullable=True)
+
+
 def initialize_auth_data():
     with app.app_context():
         db.create_all()
@@ -779,17 +855,39 @@ def login():
         email = request.form["email"]
         password = request.form["password"]
         user = User.query.filter_by(email=email).first()
+        now = utcnow()
+
+        # Brute-force protection: lock the account after repeated failures.
+        attempt = LoginAttempt.query.filter_by(email=email).first()
+        if attempt and attempt.locked_until and attempt.locked_until > now:
+            return jsonify(
+                {"message": "Too many failed attempts. Try again later."}
+            ), 429
 
         if not user or not check_password_hash(user.password, password):
+            if attempt is None:
+                attempt = LoginAttempt(email=email, attempts=0, first_attempt_at=now)
+                db.session.add(attempt)
+            attempt.attempts = (attempt.attempts or 0) + 1
+            if attempt.first_attempt_at is None:
+                attempt.first_attempt_at = now
+            if attempt.attempts >= 5:
+                attempt.locked_until = now + timedelta(minutes=15)
+            db.session.commit()
             return jsonify({"message": "Invalid email or password"}), 401
 
+        # Successful login clears any recorded failures for this account.
+        if attempt:
+            db.session.delete(attempt)
+            db.session.commit()
         remember = request.form.get("remember") in ("on", "true", "1")
+        issued_at = datetime.now(timezone.utc)
         token = jwt.encode(
             {
                 "public_id": user.public_id,
                 "remember": remember,
-                "exp": datetime.now(timezone.utc)
-                + (REMEMBER_TTL if remember else SESSION_TTL),
+                "iat": issued_at,
+                "exp": issued_at + (REMEMBER_TTL if remember else SESSION_TTL),
             },
             app.config["SECRET_KEY"],
             algorithm="HS256",
@@ -797,13 +895,7 @@ def login():
 
         response = make_response(redirect(url_for("index")))
         # Persistent cookie when "Remember me" is ticked; session cookie otherwise.
-        response.set_cookie(
-            "jwt_token",
-            token,
-            max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
-            httponly=True,
-            samesite="Lax",
-        )
+        set_jwt_cookie(response, token, remember)
 
         return response
 
@@ -813,7 +905,7 @@ def login():
 @app.route("/logout", methods=["POST"])
 def logout():
     response = make_response(redirect(url_for("login")))
-    response.set_cookie("jwt_token", "", expires=0)
+    clear_jwt_cookie(response)
     return response
 
 
