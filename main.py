@@ -748,14 +748,29 @@ def login():
         token = jwt.encode(
             {
                 "public_id": user.public_id,
-                "exp": datetime.now(timezone.utc) + timedelta(hours=1),
+                # "Remember me" -> persistent 30-day token; otherwise a 1-hour token.
+                "exp": datetime.now(timezone.utc)
+                + (
+                    timedelta(days=30)
+                    if request.form.get("remember") in ("on", "true", "1")
+                    else timedelta(hours=1)
+                ),
             },
             app.config["SECRET_KEY"],
             algorithm="HS256",
         )
 
         response = make_response(redirect(url_for("index")))
-        response.set_cookie("jwt_token", token)
+        # Persistent cookie when "Remember me" is ticked; session cookie otherwise.
+        response.set_cookie(
+            "jwt_token",
+            token,
+            max_age=30 * 24 * 3600
+            if request.form.get("remember") in ("on", "true", "1")
+            else None,
+            httponly=True,
+            samesite="Lax",
+        )
 
         return response
 
