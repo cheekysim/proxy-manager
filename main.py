@@ -174,6 +174,44 @@ def build_proxy_config(ip, port, protocol):
     return f"server {{ listen {port}{udp_suffix}; proxy_pass {ip}:{port}; }}\n"
 
 
+def get_sync_flag(ip, port, protocol):
+    setting = ProxySetting.query.filter_by(
+        ip=ip, port=str(port), protocol=protocol.lower()
+    ).first()
+    if setting is None:
+        return True
+    return bool(setting.sync_to_pterodactyl)
+
+
+def set_sync_flag(ip, port, protocol, value):
+    port_str = str(port)
+    proto = protocol.lower()
+    setting = ProxySetting.query.filter_by(
+        ip=ip, port=port_str, protocol=proto
+    ).first()
+    if setting is None:
+        setting = ProxySetting(
+            ip=ip,
+            port=port_str,
+            protocol=proto,
+            sync_to_pterodactyl=bool(value),
+        )
+        db.session.add(setting)
+    else:
+        setting.sync_to_pterodactyl = bool(value)
+    db.session.commit()
+    return setting
+
+
+def delete_sync_flag(ip, port, protocol):
+    setting = ProxySetting.query.filter_by(
+        ip=ip, port=str(port), protocol=protocol.lower()
+    ).first()
+    if setting:
+        db.session.delete(setting)
+        db.session.commit()
+
+
 def test_and_reload_nginx():
     if development_mode:
         return True, None
@@ -319,6 +357,19 @@ def sync_allocations():
         for allocation in allocations:
             parsed = parse_allocation(allocation)
             parsed_allocations.append(parsed)
+
+            # If any protocol setting for this ip:port has sync_to_pterodactyl explicitly False,
+            # reconcile by deleting the allocation rather than trusting it / bringing back configs.
+            sync_off_setting = ProxySetting.query.filter_by(
+                ip=parsed["ip"], port=str(parsed["port"]), sync_to_pterodactyl=False
+            ).first()
+            if sync_off_setting:
+                try:
+                    delete_allocation(parsed["id"])
+                except Exception as del_err:
+                    print(f"Error deleting allocation for sync-off proxy {parsed['ip']}:{parsed['port']}: {del_err}")
+                continue
+
             filename = proxy_filename(parsed["ip"], parsed["port"], "tcp")
             filename_udp = proxy_filename(parsed["ip"], parsed["port"], "udp")
             filename_both = proxy_filename(parsed["ip"], parsed["port"], "both")
@@ -344,22 +395,42 @@ def sync_allocations():
             for item in os.listdir(config_files_path)
             if item.endswith(".conf")
         ]
+        items = [item for item in items if item is not None]
+
+        # Clean up any lingering allocations for local proxies whose flag is explicitly off
+        sync_off_local_items = [
+            item for item in items
+            if not get_sync_flag(item["ip"], item["port"], item["protocol"])
+        ]
+        for off_item in sync_off_local_items:
+            alloc = find_allocation_by_ip_port(off_item["ip"], off_item["port"])
+            if alloc:
+                try:
+                    delete_allocation(alloc["id"])
+                except Exception as del_err:
+                    print(f"Error cleaning up allocation for sync-off proxy {off_item['ip']}:{off_item['port']}: {del_err}")
+
+        # Filter to only local proxies whose flag is on
+        sync_on_items = [
+            item for item in items
+            if get_sync_flag(item["ip"], item["port"], item["protocol"])
+        ]
+
         # Remove dupe entries keeping tcp over udp if both exist for same ip:port
-        items = sorted(
-            items,
+        sync_on_items = sorted(
+            sync_on_items,
             key=lambda x: (x["ip"], x["port"], 0 if x["protocol"] == "tcp" else 1),
         )
         unique_items = []
         seen = set()
-        for item in items:
+        for item in sync_on_items:
             key = (item["ip"], item["port"])
             if key not in seen:
                 unique_items.append(item)
                 seen.add(key)
-        items = unique_items
 
         print(
-            f"Found {len(items)} proxy config files locally and {len(parsed_allocations)} allocations from Pterodactyl API"
+            f"Found {len(items)} proxy config files locally ({len(unique_items)} synced) and {len(parsed_allocations)} allocations from Pterodactyl API"
         )
         for item in unique_items:
             if not any(
@@ -376,7 +447,8 @@ def hourly_sync_loop(interval_seconds=3600):
     while True:
         time.sleep(interval_seconds)
         try:
-            sync_allocations()
+            with app.app_context():
+                sync_allocations()
         except Exception as e:
             print(f"Hourly sync failed: {e}")
 
@@ -416,6 +488,10 @@ def list_items(current_user):
         if item.endswith(".conf")
     ]
     items = [item for item in items if item is not None]
+    for item in items:
+        item["sync_to_pterodactyl"] = get_sync_flag(
+            item["ip"], item["port"], item["protocol"]
+        )
     return jsonify(items)
 
 
@@ -546,6 +622,16 @@ def add_proxy(current_user):
     ip = payload.get("ip", "").strip()
     port = str(payload.get("port", "")).strip()
     protocol = payload.get("protocol", "").strip().lower()
+    sync_to_pterodactyl = payload.get("sync_to_pterodactyl", True)
+    if isinstance(sync_to_pterodactyl, str):
+        sync_to_pterodactyl = sync_to_pterodactyl.strip().lower() in {
+            "1",
+            "true",
+            "yes",
+            "on",
+        }
+    else:
+        sync_to_pterodactyl = bool(sync_to_pterodactyl)
 
     is_valid, error = validate_proxy_data(ip, port, protocol)
     if not is_valid:
@@ -583,30 +669,42 @@ def add_proxy(current_user):
             test_and_reload_nginx()
         return jsonify({"error": f"Nginx reload failed: {error_message}"}), 500
 
-    try:
-        existing_allocation = find_allocation_by_ip_port(ip, port)
-        if not existing_allocation:
-            create_allocation(ip, port)
-    except Exception as e:
-        rollback_error = None
+    previous_sync_flag_row = ProxySetting.query.filter_by(
+        ip=ip, port=port, protocol=protocol
+    ).first()
+    set_sync_flag(ip, port, protocol, sync_to_pterodactyl)
+
+    if sync_to_pterodactyl:
         try:
-            if os.path.exists(file_path):
-                os.remove(file_path)
-            rollback_ok, rollback_nginx_error = test_and_reload_nginx()
-            if not rollback_ok:
-                rollback_error = rollback_nginx_error
-        except Exception as rollback_exception:
-            rollback_error = str(rollback_exception)
+            existing_allocation = find_allocation_by_ip_port(ip, port)
+            if not existing_allocation:
+                create_allocation(ip, port)
+        except Exception as e:
+            rollback_error = None
+            try:
+                if previous_sync_flag_row is None:
+                    delete_sync_flag(ip, port, protocol)
+                else:
+                    set_sync_flag(
+                        ip, port, protocol, previous_sync_flag_row.sync_to_pterodactyl
+                    )
+                if os.path.exists(file_path):
+                    os.remove(file_path)
+                rollback_ok, rollback_nginx_error = test_and_reload_nginx()
+                if not rollback_ok:
+                    rollback_error = rollback_nginx_error
+            except Exception as rollback_exception:
+                rollback_error = str(rollback_exception)
 
-        if rollback_error:
-            return jsonify(
-                {
-                    "error": f"Failed to create allocation: {e}",
-                    "rollback_error": rollback_error,
-                }
-            ), 502
+            if rollback_error:
+                return jsonify(
+                    {
+                        "error": f"Failed to create allocation: {e}",
+                        "rollback_error": rollback_error,
+                    }
+                ), 502
 
-        return jsonify({"error": f"Failed to create allocation: {e}"}), 502
+            return jsonify({"error": f"Failed to create allocation: {e}"}), 502
 
     return jsonify({"ok": True})
 
@@ -664,6 +762,8 @@ def remove_proxy(current_user):
             ), 500
 
         return jsonify({"error": f"Failed to delete allocation: {e}"}), 500
+
+    delete_sync_flag(ip, port, protocol)
 
     return jsonify({"ok": True})
 
@@ -761,45 +861,156 @@ def edit_proxy(current_user):
             ), 500
         return jsonify({"error": f"Nginx reload failed: {error_message}"}), 500
 
-    created_new_allocation = False
-    deleted_old_allocation = False
-    try:
-        old_pair = (old_ip, str(old_port))
-        new_pair = (new_ip, str(new_port))
+    sync_enabled = get_sync_flag(old_ip, old_port, old_protocol)
 
-        if old_pair != new_pair:
-            new_allocation = find_allocation_by_ip_port(new_ip, new_port)
-            if not new_allocation:
-                create_allocation(new_ip, new_port)
-                created_new_allocation = True
-
-            old_allocation = find_allocation_by_ip_port(old_ip, old_port)
-            if old_allocation:
-                delete_allocation(old_allocation["id"])
-                deleted_old_allocation = True
-    except Exception as e:
-        rollback_error = rollback_local_edit()
-        remote_rollback_error = None
-
+    if sync_enabled:
+        created_new_allocation = False
+        deleted_old_allocation = False
         try:
-            if old_pair != new_pair and deleted_old_allocation:
-                old_allocation_now = find_allocation_by_ip_port(old_ip, old_port)
-                if not old_allocation_now:
-                    create_allocation(old_ip, old_port)
+            old_pair = (old_ip, str(old_port))
+            new_pair = (new_ip, str(new_port))
 
-            if old_pair != new_pair and created_new_allocation:
-                new_allocation_now = find_allocation_by_ip_port(new_ip, new_port)
-                if new_allocation_now:
-                    delete_allocation(new_allocation_now["id"])
-        except Exception as remote_exception:
-            remote_rollback_error = str(remote_exception)
+            if old_pair != new_pair:
+                new_allocation = find_allocation_by_ip_port(new_ip, new_port)
+                if not new_allocation:
+                    create_allocation(new_ip, new_port)
+                    created_new_allocation = True
 
-        error_payload = {"error": f"Failed to update allocation: {e}"}
-        if rollback_error:
-            error_payload["rollback_error"] = rollback_error
-        if remote_rollback_error:
-            error_payload["remote_rollback_error"] = remote_rollback_error
-        return jsonify(error_payload), 500
+                old_allocation = find_allocation_by_ip_port(old_ip, old_port)
+                if old_allocation:
+                    delete_allocation(old_allocation["id"])
+                    deleted_old_allocation = True
+        except Exception as e:
+            rollback_error = rollback_local_edit()
+            remote_rollback_error = None
+
+            try:
+                if old_pair != new_pair and deleted_old_allocation:
+                    old_allocation_now = find_allocation_by_ip_port(old_ip, old_port)
+                    if not old_allocation_now:
+                        create_allocation(old_ip, old_port)
+
+                if old_pair != new_pair and created_new_allocation:
+                    new_allocation_now = find_allocation_by_ip_port(new_ip, new_port)
+                    if new_allocation_now:
+                        delete_allocation(new_allocation_now["id"])
+            except Exception as remote_exception:
+                remote_rollback_error = str(remote_exception)
+
+            error_payload = {"error": f"Failed to update allocation: {e}"}
+            if rollback_error:
+                error_payload["rollback_error"] = rollback_error
+            if remote_rollback_error:
+                error_payload["remote_rollback_error"] = remote_rollback_error
+            return jsonify(error_payload), 500
+
+    # Port ProxySetting row to new key if changed
+    if (old_ip, str(old_port), old_protocol) != (new_ip, str(new_port), new_protocol):
+        old_setting = ProxySetting.query.filter_by(
+            ip=old_ip, port=str(old_port), protocol=old_protocol
+        ).first()
+        if old_setting:
+            db.session.delete(old_setting)
+            db.session.commit()
+            set_sync_flag(new_ip, new_port, new_protocol, old_setting.sync_to_pterodactyl)
+        else:
+            # If there was no row previously, missing means True (default), so sync_enabled is True
+            # We can either not create a row (since default is True) or keep it consistent
+            pass
+
+    return jsonify({"ok": True})
+
+
+@app.route("/api/sync_toggle", methods=["POST"])
+@token_required
+def toggle_sync(current_user):
+    payload = request.get_json(silent=True) or {}
+    ip = payload.get("ip", "").strip()
+    port = str(payload.get("port", "")).strip()
+    protocol = payload.get("protocol", "").strip().lower()
+
+    if "sync_to_pterodactyl" not in payload:
+        return jsonify({"error": "sync_to_pterodactyl is required"}), 400
+
+    target_sync = payload.get("sync_to_pterodactyl")
+    if isinstance(target_sync, str):
+        target_sync = target_sync.strip().lower() in {"1", "true", "yes", "on"}
+    else:
+        target_sync = bool(target_sync)
+
+    is_valid, error = validate_proxy_data(ip, port, protocol)
+    if not is_valid:
+        return jsonify({"error": error}), 400
+
+    filename = proxy_filename(ip, port, protocol)
+    file_path = os.path.join(config_files_path, filename)
+    if not os.path.exists(file_path):
+        return jsonify({"error": "Proxy config not found"}), 404
+
+    current_sync = get_sync_flag(ip, port, protocol)
+    if current_sync == target_sync:
+        return jsonify({"ok": True})
+
+    previous_setting_row = ProxySetting.query.filter_by(
+        ip=ip, port=port, protocol=protocol
+    ).first()
+
+    if target_sync:
+        # Turning ON: ensure allocation exists (create if missing), then set flag; rollback on failure
+        allocation_created = False
+        try:
+            existing_allocation = find_allocation_by_ip_port(ip, port)
+            if not existing_allocation:
+                create_allocation(ip, port)
+                allocation_created = True
+            set_sync_flag(ip, port, protocol, True)
+        except Exception as e:
+            # Rollback allocation if created
+            remote_rollback_error = None
+            if allocation_created:
+                try:
+                    created_alloc = find_allocation_by_ip_port(ip, port)
+                    if created_alloc:
+                        delete_allocation(created_alloc["id"])
+                except Exception as remote_exc:
+                    remote_rollback_error = str(remote_exc)
+            # Restore previous setting
+            if previous_setting_row is None:
+                delete_sync_flag(ip, port, protocol)
+            else:
+                set_sync_flag(ip, port, protocol, previous_setting_row.sync_to_pterodactyl)
+
+            error_payload = {"error": f"Failed to enable sync: {e}"}
+            if remote_rollback_error:
+                error_payload["remote_rollback_error"] = remote_rollback_error
+            return jsonify(error_payload), 502
+    else:
+        # Turning OFF: delete allocation if present, then set flag; restore prior state on failure
+        deleted_alloc_id = None
+        try:
+            existing_allocation = find_allocation_by_ip_port(ip, port)
+            if existing_allocation:
+                deleted_alloc_id = existing_allocation["id"]
+                delete_allocation(deleted_alloc_id)
+            set_sync_flag(ip, port, protocol, False)
+        except Exception as e:
+            # If we deleted allocation, try to recreate it
+            remote_rollback_error = None
+            if deleted_alloc_id is not None:
+                try:
+                    create_allocation(ip, port)
+                except Exception as remote_exc:
+                    remote_rollback_error = str(remote_exc)
+            # Restore previous setting
+            if previous_setting_row is None:
+                delete_sync_flag(ip, port, protocol)
+            else:
+                set_sync_flag(ip, port, protocol, previous_setting_row.sync_to_pterodactyl)
+
+            error_payload = {"error": f"Failed to disable sync: {e}"}
+            if remote_rollback_error:
+                error_payload["remote_rollback_error"] = remote_rollback_error
+            return jsonify(error_payload), 502
 
     return jsonify({"ok": True})
 
@@ -810,6 +1021,18 @@ class Node(db.Model):
     name = db.Column(db.String(100), unique=True)
     fqdn = db.Column(db.String(255), unique=True)
     ip_address = db.Column(db.String(45), unique=True, nullable=True)
+
+
+class ProxySetting(db.Model):
+    id = db.Column(db.Integer, primary_key=True)
+    ip = db.Column(db.String(45), nullable=False)
+    port = db.Column(db.String(10), nullable=False)
+    protocol = db.Column(db.String(10), nullable=False)
+    sync_to_pterodactyl = db.Column(db.Boolean, default=True, nullable=False)
+
+    __table_args__ = (
+        db.UniqueConstraint("ip", "port", "protocol", name="uq_proxy_setting_ip_port_protocol"),
+    )
 
 
 # Authentication
@@ -924,7 +1147,8 @@ def list_allocations(current_user):
 
 # Startup tasks
 initialize_auth_data()
-sync_allocations()
+with app.app_context():
+    sync_allocations()
 if os.getenv("WERKZEUG_RUN_MAIN") != "false":
     start_hourly_sync_task()
 
