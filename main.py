@@ -126,9 +126,6 @@ def clear_jwt_cookie(response):
     response.delete_cookie(
         "jwt_token",
         path=JWT_COOKIE_PATH,
-        httponly=True,
-        samesite="Lax",
-        secure=not development_mode,
     )
 
 
