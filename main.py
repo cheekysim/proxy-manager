@@ -58,6 +58,13 @@ try:
 except ValueError:
     app_port = 5000
 
+# Sliding-session lifetime: the JWT is refreshed on activity and only expires
+# after this much *inactivity*. "Remember me" additionally makes the cookie
+# persistent (survives browser restart) and uses the longer TTL.
+SESSION_TTL = timedelta(days=7)            # "remember me" unticked
+REMEMBER_TTL = timedelta(days=30)          # "remember me" ticked
+RENEW_BEFORE_EXPIRY = timedelta(hours=24)  # refresh token when < 24h of life left
+
 
 def proxy_filename(ip, port, protocol):
     ip_filename = ip.replace(".", "-")
@@ -154,7 +161,38 @@ def token_required(f):
         except jwt.PyJWTError:
             return jsonify({"message": "Token is invalid!"}), 401
 
-        return f(current_user, *args, **kwargs)
+        if current_user is None:
+            return jsonify({"message": "Token is invalid!"}), 401
+
+        response = make_response(f(current_user, *args, **kwargs))
+
+        # Sliding session: while the user is active, renew the token before it
+        # expires so they are never logged out just because the session hit its
+        # absolute expiry. The token only dies after ~RENEW_BEFORE_EXPIRY worth
+        # of genuine inactivity past the TTL.
+        exp_dt = datetime.fromtimestamp(data["exp"], tz=timezone.utc)
+        now = datetime.now(timezone.utc)
+        if exp_dt - now < RENEW_BEFORE_EXPIRY:
+            remember = bool(data.get("remember"))
+            new_exp = now + (REMEMBER_TTL if remember else SESSION_TTL)
+            new_token = jwt.encode(
+                {
+                    "public_id": current_user.public_id,
+                    "remember": remember,
+                    "exp": new_exp,
+                },
+                app.config["SECRET_KEY"],
+                algorithm="HS256",
+            )
+            response.set_cookie(
+                "jwt_token",
+                new_token,
+                max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
+                httponly=True,
+                samesite="Lax",
+            )
+
+        return response
 
     return decorated
 
@@ -745,16 +783,13 @@ def login():
         if not user or not check_password_hash(user.password, password):
             return jsonify({"message": "Invalid email or password"}), 401
 
+        remember = request.form.get("remember") in ("on", "true", "1")
         token = jwt.encode(
             {
                 "public_id": user.public_id,
-                # "Remember me" -> persistent 30-day token; otherwise a 1-hour token.
+                "remember": remember,
                 "exp": datetime.now(timezone.utc)
-                + (
-                    timedelta(days=30)
-                    if request.form.get("remember") in ("on", "true", "1")
-                    else timedelta(hours=1)
-                ),
+                + (REMEMBER_TTL if remember else SESSION_TTL),
             },
             app.config["SECRET_KEY"],
             algorithm="HS256",
@@ -765,9 +800,7 @@ def login():
         response.set_cookie(
             "jwt_token",
             token,
-            max_age=30 * 24 * 3600
-            if request.form.get("remember") in ("on", "true", "1")
-            else None,
+            max_age=int(REMEMBER_TTL.total_seconds()) if remember else None,
             httponly=True,
             samesite="Lax",
         )
