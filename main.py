@@ -50,6 +50,14 @@ def env_flag(name, default=False):
 development_mode = env_flag("DEVELOPMENT", False)
 pterodactyl_node_id = os.getenv("PTERODACTYL_NODE_ID", "6")
 
+# Bind address/port for the dev Flask server (`flask run` / `python main.py`).
+# Production (gunicorn via systemd) reads the same vars — see README.
+app_host = os.getenv("HOST", "127.0.0.1")
+try:
+    app_port = int(os.getenv("PORT", "5000"))
+except ValueError:
+    app_port = 5000
+
 
 def proxy_filename(ip, port, protocol):
     ip_filename = ip.replace(".", "-")
@@ -781,4 +789,4 @@ if os.getenv("WERKZEUG_RUN_MAIN") != "false":
     start_hourly_sync_task()
 
 if __name__ == "__main__":
-    app.run()
+    app.run(host=app_host, port=app_port)

@@ -45,6 +45,8 @@ cp .env.example .env
 | `ADMIN_PASSWORD` | Admin login password | `admin` |
 | `CONFIG_FILES_PATH` | Path to nginx config directory | `./configs` |
 | `DEVELOPMENT` | Skip nginx reload when `true` | `false` |
+| `HOST` | Bind address (dev server) | `127.0.0.1` |
+| `PORT` | Bind port (dev server + gunicorn) | `5000` |
 | `PTERODACTYL_API_URL` | Base URL of your Pterodactyl panel | — |
 | `PTERODACTYL_API_KEY` | Pterodactyl Application API key | — |
 
@@ -58,8 +60,9 @@ Or use the included VS Code launch profile **Python: Flask (Hot Reload)**.
 
 **Production:**
 ```bash
-gunicorn main:app -w 4 -b 0.0.0.0:5000
+gunicorn main:app -w 4 -b "${HOST:-127.0.0.1}:${PORT:-5000}"
 ```
+The bind address/port are read from `HOST`/`PORT` in `.env` (defaults `127.0.0.1:5000`).
 `-w` is the number of worker processes. A common starting point is `(2 × CPU cores) + 1`.
 
 ### 4. Web Config
@@ -142,11 +145,11 @@ After=network.target
 User=www-data
 WorkingDirectory=/opt/proxy-manager
 EnvironmentFile=/opt/proxy-manager/.env
-ExecStart=/opt/proxy-manager/.venv/bin/gunicorn main:app \
+ExecStart=/bin/sh -c 'exec /opt/proxy-manager/.venv/bin/gunicorn main:app \
     -w 4 \
-    -b 127.0.0.1:5000 \
+    -b "${HOST:-127.0.0.1}:${PORT:-5000}" \
     --access-logfile /var/log/proxy-manager/access.log \
-    --error-logfile /var/log/proxy-manager/error.log
+    --error-logfile /var/log/proxy-manager/error.log'
 Restart=always
 RestartSec=5
 
